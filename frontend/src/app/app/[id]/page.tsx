@@ -1,12 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import Image from "next/image";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
+import { useToast } from "@/components/Toast";
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
 type App = {
   id: string;
@@ -16,12 +19,45 @@ type App = {
   how_to_use: string;
   download_url: string;
   icon_url: string;
+  screenshots: string[] | string;
+  youtube_url: string;
   publisher: string;
   publisher_avatar: string;
+  likes_count: number;
+  dislikes_count: number;
   created_at: string;
 };
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+type Comment = {
+  id: string;
+  app_id: string;
+  parent_id: string | null;
+  content: string;
+  author_name: string;
+  author_avatar: string;
+  likes_count: number;
+  dislikes_count: number;
+  created_at: string;
+};
+
+function parseScreenshots(raw: string[] | string | undefined): string[] {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw;
+  try {
+    const p = JSON.parse(raw);
+    return Array.isArray(p) ? p : [];
+  } catch {
+    return [];
+  }
+}
+
+function getYoutubeEmbed(url: string): string | null {
+  if (!url) return null;
+  const m =
+    url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|shorts\/))([a-zA-Z0-9_-]{11})/) ||
+    url.match(/^([a-zA-Z0-9_-]{11})$/);
+  return m ? `https://www.youtube.com/embed/${m[1]}` : null;
+}
 
 function AppIcon({ src, name, size = 56 }: { src?: string; name: string; size?: number }) {
   if (src) {
@@ -48,39 +84,67 @@ function AppIcon({ src, name, size = 56 }: { src?: string; name: string; size?: 
   );
 }
 
-function PublisherAvatar({ src, name }: { src?: string; name?: string }) {
+function Avatar({ src, name, size = 28 }: { src?: string; name?: string; size?: number }) {
   if (src) {
     return (
       <Image
         src={src}
-        alt={name || "Publisher"}
-        width={24}
-        height={24}
-        className="h-6 w-6 rounded-full object-cover"
+        alt={name || "User"}
+        width={size}
+        height={size}
+        className="rounded-full object-cover"
+        style={{ width: size, height: size }}
         unoptimized
       />
     );
   }
   const letter = (name || "A").charAt(0).toUpperCase();
   return (
-    <div className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--border)] text-xs font-medium text-[var(--muted)]">
+    <div
+      className="flex items-center justify-center rounded-full bg-[var(--border)] text-xs font-medium text-[var(--muted)]"
+      style={{ width: size, height: size }}
+    >
       {letter}
     </div>
   );
+}
+
+function timeAgo(dateStr: string) {
+  const d = new Date(dateStr);
+  const diff = (Date.now() - d.getTime()) / 1000;
+  if (diff < 60) return "just now";
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`;
+  return d.toLocaleDateString();
 }
 
 export default function AppDetailPage() {
   const params = useParams();
   const id = params.id as string;
   const { data: session } = useSession();
+  const { toast } = useToast();
 
   const [app, setApp] = useState<App | null>(null);
+  const [comments, setComments] = useState<Comment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [commentText, setCommentText] = useState("");
+  const [replyTo, setReplyTo] = useState<string | null>(null);
+  const [replyText, setReplyText] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [lightbox, setLightbox] = useState<string | null>(null);
+
+  const loadComments = useCallback(() => {
+    if (!id) return;
+    fetch(`${API_URL}/api/comments?app_id=${id}`)
+      .then((r) => r.json())
+      .then((data) => setComments(Array.isArray(data) ? data : []))
+      .catch(() => setComments([]));
+  }, [id]);
 
   useEffect(() => {
     if (!id) return;
-
     fetch(`${API_URL}/api/apps/${id}`)
       .then((res) => {
         if (!res.ok) throw new Error("App not found");
@@ -94,7 +158,68 @@ export default function AppDetailPage() {
         setError(err.message);
         setLoading(false);
       });
-  }, [id]);
+    loadComments();
+  }, [id, loadComments]);
+
+  const handleVote = async (targetType: "app" | "comment", targetId: string, value: 1 | -1) => {
+    if (!session?.user?.email) {
+      toast("Please sign in to vote", "error");
+      return;
+    }
+    try {
+      const res = await fetch(`${API_URL}/api/vote`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_email: session.user.email,
+          target_type: targetType,
+          target_id: targetId,
+          value,
+        }),
+      });
+      const data = await res.json();
+      if (targetType === "app" && app) {
+        setApp({ ...app, likes_count: data.likes_count, dislikes_count: data.dislikes_count });
+      } else {
+        loadComments();
+      }
+    } catch {
+      toast("Failed to vote", "error");
+    }
+  };
+
+  const submitComment = async (parentId: string | null, text: string) => {
+    if (!session?.user) {
+      toast("Please sign in to comment", "error");
+      return;
+    }
+    if (!text.trim()) return;
+    setSubmitting(true);
+    try {
+      const res = await fetch(`${API_URL}/api/comments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          app_id: id,
+          parent_id: parentId,
+          content: text.trim(),
+          user_email: session.user.email,
+          author_name: session.user.name || "",
+          author_avatar: session.user.image || "",
+        }),
+      });
+      if (!res.ok) throw new Error("Failed");
+      setCommentText("");
+      setReplyText("");
+      setReplyTo(null);
+      loadComments();
+      toast("Comment posted", "success");
+    } catch {
+      toast("Failed to post comment", "error");
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -113,106 +238,331 @@ export default function AppDetailPage() {
       <>
         <Header showPublish={false} />
         <main className="flex flex-1 flex-col items-center justify-center px-4">
-          <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] px-8 py-12 text-center">
-            <p className="text-lg text-[var(--muted)]">
-              {error || "App not found"}
-            </p>
-            <Link
-              href="/"
-              className="mt-4 inline-block text-sm font-medium text-[var(--accent)] hover:underline"
-            >
-              ← Back to home
-            </Link>
-          </div>
+          <p className="text-lg text-[var(--muted)]">{error || "App not found"}</p>
+          <Link href="/" className="mt-4 text-sm text-[var(--accent)] hover:underline">
+            ← Back to home
+          </Link>
         </main>
         <Footer />
       </>
     );
   }
 
+  const screenshots = parseScreenshots(app.screenshots);
+  const embedUrl = getYoutubeEmbed(app.youtube_url || "");
+  const topComments = comments.filter((c) => !c.parent_id);
+  const getReplies = (parentId: string) => comments.filter((c) => c.parent_id === parentId);
+
   return (
     <>
       <Header showPublish={false} />
-      <main className="mx-auto w-full max-w-2xl flex-1 px-4 py-12">
+      <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8 sm:px-6 lg:px-8">
+        {/* Breadcrumb + Header */}
         <div className="mb-8">
           <Link
             href="/"
-            className="mb-4 inline-block text-sm text-[var(--muted)] hover:text-[var(--foreground)]"
+            className="mb-5 inline-block text-sm text-[var(--muted)] hover:text-[var(--foreground)]"
           >
             ← All apps
           </Link>
 
-          <div className="flex items-start gap-4">
-            <AppIcon src={app.icon_url} name={app.name} size={64} />
-            <div className="min-w-0 flex-1">
-              <div className="flex items-start justify-between gap-3">
-                <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
-                  {app.name}
-                </h1>
-                {session && (
-                  <Link
-                    href={`/app/${app.id}/edit`}
-                    className="shrink-0 rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm font-medium transition hover:bg-[var(--card)]"
-                  >
-                    Edit
-                  </Link>
-                )}
+          <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex items-start gap-4">
+              <AppIcon src={app.icon_url} name={app.name} size={72} />
+              <div>
+                <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">{app.name}</h1>
+                <div className="mt-2 flex items-center gap-2 text-sm text-[var(--muted)]">
+                  <Avatar src={app.publisher_avatar} name={app.publisher} size={22} />
+                  <span>Published by {app.publisher || "Anonymous"}</span>
+                </div>
               </div>
-              <div className="mt-2 flex items-center gap-2 text-sm text-[var(--muted)]">
-                <PublisherAvatar src={app.publisher_avatar} name={app.publisher} />
-                <span>Published by {app.publisher || "Anonymous"}</span>
-              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Like / Dislike */}
+              <button
+                onClick={() => handleVote("app", app.id, 1)}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 text-sm transition hover:border-emerald-500/40 hover:bg-emerald-500/10"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
+                </svg>
+                {app.likes_count || 0}
+              </button>
+              <button
+                onClick={() => handleVote("app", app.id, -1)}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 text-sm transition hover:border-red-500/40 hover:bg-red-500/10"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10zM17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17" />
+                </svg>
+                {app.dislikes_count || 0}
+              </button>
+
+              {session && (
+                <Link
+                  href={`/app/${app.id}/edit`}
+                  className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm font-medium transition hover:bg-[var(--card)]"
+                >
+                  Edit
+                </Link>
+              )}
+              {app.download_url && (
+                <a
+                  href={app.download_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-[var(--accent)] px-4 py-1.5 text-sm font-medium text-white transition hover:bg-[var(--accent-hover)]"
+                >
+                  Get the app →
+                </a>
+              )}
             </div>
           </div>
         </div>
 
-        <div className="space-y-4">
-          <section className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-6">
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--muted)]">
-              Problem it solves
-            </h2>
-            <p className="mt-3 whitespace-pre-wrap leading-relaxed">
-              {app.problem}
-            </p>
-          </section>
-
-          {app.significance && (
+        <div className="grid gap-8 lg:grid-cols-[1fr_320px]">
+          {/* Main column */}
+          <div className="space-y-6">
+            {/* A) Description */}
             <section className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-6">
-              <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--muted)]">
-                Why it matters
+              <h2 className="mb-4 text-xs font-semibold uppercase tracking-wider text-[var(--muted)]">
+                About this app
               </h2>
-              <p className="mt-3 whitespace-pre-wrap leading-relaxed">
-                {app.significance}
-              </p>
+              <div className="space-y-5">
+                <div>
+                  <h3 className="mb-1.5 text-sm font-medium text-[var(--muted)]">Problem it solves</h3>
+                  <p className="leading-relaxed whitespace-pre-wrap">{app.problem}</p>
+                </div>
+                {app.significance && (
+                  <div>
+                    <h3 className="mb-1.5 text-sm font-medium text-[var(--muted)]">Why it matters</h3>
+                    <p className="leading-relaxed whitespace-pre-wrap">{app.significance}</p>
+                  </div>
+                )}
+                {app.how_to_use && (
+                  <div>
+                    <h3 className="mb-1.5 text-sm font-medium text-[var(--muted)]">How to use it</h3>
+                    <p className="leading-relaxed whitespace-pre-wrap">{app.how_to_use}</p>
+                  </div>
+                )}
+              </div>
             </section>
-          )}
 
-          {app.how_to_use && (
+            {/* B) Screenshots + Video */}
+            {(screenshots.length > 0 || embedUrl) && (
+              <section className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-6">
+                <h2 className="mb-4 text-xs font-semibold uppercase tracking-wider text-[var(--muted)]">
+                  Media
+                </h2>
+
+                {embedUrl && (
+                  <div className="mb-5 aspect-video w-full overflow-hidden rounded-xl bg-black">
+                    <iframe
+                      src={embedUrl}
+                      title="Demo video"
+                      className="h-full w-full"
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                      allowFullScreen
+                    />
+                  </div>
+                )}
+
+                {screenshots.length > 0 && (
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                    {screenshots.map((src, i) => (
+                      <button
+                        key={i}
+                        onClick={() => setLightbox(src)}
+                        className="group relative aspect-video overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--background)]"
+                      >
+                        <Image
+                          src={src}
+                          alt={`Screenshot ${i + 1}`}
+                          fill
+                          className="object-cover transition group-hover:scale-105"
+                          unoptimized
+                        />
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </section>
+            )}
+
+            {/* C) Comments */}
             <section className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-6">
-              <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--muted)]">
-                How to use it
+              <h2 className="mb-5 text-xs font-semibold uppercase tracking-wider text-[var(--muted)]">
+                Comments ({comments.length})
               </h2>
-              <p className="mt-3 whitespace-pre-wrap leading-relaxed">
-                {app.how_to_use}
-              </p>
-            </section>
-          )}
-        </div>
 
-        {app.download_url && (
-          <div className="mt-10">
-            <a
-              href={app.download_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 rounded-xl bg-[var(--accent)] px-6 py-3.5 font-medium text-white transition hover:bg-[var(--accent-hover)]"
-            >
-              Get the app
-              <span aria-hidden>→</span>
-            </a>
+              {/* New comment */}
+              {session ? (
+                <div className="mb-6 flex gap-3">
+                  <Avatar src={session.user?.image || undefined} name={session.user?.name || undefined} />
+                  <div className="flex-1">
+                    <textarea
+                      value={commentText}
+                      onChange={(e) => setCommentText(e.target.value)}
+                      rows={3}
+                      placeholder="Share your thoughts..."
+                      className="w-full resize-none rounded-xl border border-[var(--border)] bg-[var(--background)] px-4 py-3 text-sm outline-none transition focus:border-[var(--accent)]"
+                    />
+                    <div className="mt-2 flex justify-end">
+                      <button
+                        onClick={() => submitComment(null, commentText)}
+                        disabled={submitting || !commentText.trim()}
+                        className="rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white transition hover:bg-[var(--accent-hover)] disabled:opacity-50"
+                      >
+                        {submitting ? "Posting..." : "Comment"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <p className="mb-6 text-sm text-[var(--muted)]">
+                  <Link href="/login" className="text-[var(--accent)] hover:underline">
+                    Sign in
+                  </Link>{" "}
+                  to leave a comment.
+                </p>
+              )}
+
+              {/* Comment list */}
+              <div className="space-y-5">
+                {topComments.length === 0 && (
+                  <p className="text-sm text-[var(--muted)]">No comments yet. Be the first!</p>
+                )}
+                {topComments.map((c) => (
+                  <div key={c.id}>
+                    <div className="flex gap-3">
+                      <Avatar src={c.author_avatar} name={c.author_name} />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 text-sm">
+                          <span className="font-medium">{c.author_name || "Anonymous"}</span>
+                          <span className="text-xs text-[var(--muted)]">{timeAgo(c.created_at)}</span>
+                        </div>
+                        <p className="mt-1 text-sm leading-relaxed whitespace-pre-wrap">{c.content}</p>
+                        <div className="mt-2 flex items-center gap-3 text-xs text-[var(--muted)]">
+                          <button
+                            onClick={() => handleVote("comment", c.id, 1)}
+                            className="inline-flex items-center gap-1 hover:text-emerald-500"
+                          >
+                            ▲ {c.likes_count || 0}
+                          </button>
+                          <button
+                            onClick={() => handleVote("comment", c.id, -1)}
+                            className="inline-flex items-center gap-1 hover:text-red-500"
+                          >
+                            ▼ {c.dislikes_count || 0}
+                          </button>
+                          {session && (
+                            <button
+                              onClick={() => setReplyTo(replyTo === c.id ? null : c.id)}
+                              className="hover:text-[var(--foreground)]"
+                            >
+                              Reply
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Reply form */}
+                        {replyTo === c.id && (
+                          <div className="mt-3 flex gap-2">
+                            <textarea
+                              value={replyText}
+                              onChange={(e) => setReplyText(e.target.value)}
+                              rows={2}
+                              placeholder="Write a reply..."
+                              className="flex-1 resize-none rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)]"
+                            />
+                            <button
+                              onClick={() => submitComment(c.id, replyText)}
+                              disabled={submitting || !replyText.trim()}
+                              className="self-end rounded-lg bg-[var(--accent)] px-3 py-2 text-sm text-white disabled:opacity-50"
+                            >
+                              Reply
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Nested replies */}
+                        {getReplies(c.id).map((r) => (
+                          <div key={r.id} className="mt-4 ml-2 flex gap-3 border-l-2 border-[var(--border)] pl-4">
+                            <Avatar src={r.author_avatar} name={r.author_name} size={24} />
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2 text-sm">
+                                <span className="font-medium">{r.author_name || "Anonymous"}</span>
+                                <span className="text-xs text-[var(--muted)]">{timeAgo(r.created_at)}</span>
+                              </div>
+                              <p className="mt-1 text-sm leading-relaxed whitespace-pre-wrap">{r.content}</p>
+                              <div className="mt-1.5 flex items-center gap-3 text-xs text-[var(--muted)]">
+                                <button
+                                  onClick={() => handleVote("comment", r.id, 1)}
+                                  className="inline-flex items-center gap-1 hover:text-emerald-500"
+                                >
+                                  ▲ {r.likes_count || 0}
+                                </button>
+                                <button
+                                  onClick={() => handleVote("comment", r.id, -1)}
+                                  className="inline-flex items-center gap-1 hover:text-red-500"
+                                >
+                                  ▼ {r.dislikes_count || 0}
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
           </div>
-        )}
+
+          {/* Sidebar */}
+          <aside className="space-y-4">
+            <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-5">
+              <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-[var(--muted)]">
+                Quick info
+              </h3>
+              <dl className="space-y-3 text-sm">
+                <div>
+                  <dt className="text-[var(--muted)]">Publisher</dt>
+                  <dd className="mt-0.5 flex items-center gap-2 font-medium">
+                    <Avatar src={app.publisher_avatar} name={app.publisher} size={20} />
+                    {app.publisher || "Anonymous"}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-[var(--muted)]">Likes</dt>
+                  <dd className="mt-0.5 font-medium">{app.likes_count || 0}</dd>
+                </div>
+                <div>
+                  <dt className="text-[var(--muted)]">Dislikes</dt>
+                  <dd className="mt-0.5 font-medium">{app.dislikes_count || 0}</dd>
+                </div>
+              </dl>
+            </div>
+          </aside>
+        </div>
       </main>
+
+      {/* Lightbox */}
+      {lightbox && (
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 p-4"
+          onClick={() => setLightbox(null)}
+        >
+          <img
+            src={lightbox}
+            alt="Screenshot"
+            className="max-h-[90vh] max-w-full rounded-lg object-contain"
+          />
+        </div>
+      )}
+
       <Footer />
     </>
   );

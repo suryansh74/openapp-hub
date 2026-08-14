@@ -40,6 +40,8 @@ export default function EditAppPage() {
     how_to_use: "",
     download_url: "",
     icon_url: "",
+    youtube_url: "",
+    screenshots: "" as string, // comma or newline separated URLs for simplicity
     publisher: "",
   });
 
@@ -56,6 +58,11 @@ export default function EditAppPage() {
         return res.json();
       })
       .then((data: App) => {
+        let shots: string[] = [];
+        try {
+          if (Array.isArray(data.screenshots)) shots = data.screenshots;
+          else if (typeof data.screenshots === "string") shots = JSON.parse(data.screenshots || "[]");
+        } catch {}
         setForm({
           name: data.name || "",
           problem: data.problem || "",
@@ -63,6 +70,8 @@ export default function EditAppPage() {
           how_to_use: data.how_to_use || "",
           download_url: data.download_url || "",
           icon_url: data.icon_url || "",
+          youtube_url: data.youtube_url || "",
+          screenshots: shots.join("\n"),
           publisher: data.publisher || "",
         });
         setLoading(false);
@@ -86,8 +95,20 @@ export default function EditAppPage() {
 
     try {
       // Keep publisher avatar in sync with current session image
+      const shots = form.screenshots
+        .split(/[\n,]+/)
+        .map((s) => s.trim())
+        .filter(Boolean);
       const payload = {
-        ...form,
+        name: form.name,
+        problem: form.problem,
+        significance: form.significance,
+        how_to_use: form.how_to_use,
+        download_url: form.download_url,
+        icon_url: form.icon_url,
+        youtube_url: form.youtube_url,
+        screenshots: shots,
+        publisher: form.publisher,
         publisher_avatar: session?.user?.image || "",
       };
 
@@ -248,6 +269,37 @@ export default function EditAppPage() {
               onChange={handleChange}
               className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm outline-none transition focus:border-[var(--accent)]"
             />
+          </div>
+
+          <div>
+            <label className="mb-1.5 block text-sm font-medium">
+              YouTube video URL
+            </label>
+            <input
+              name="youtube_url"
+              type="url"
+              value={form.youtube_url}
+              onChange={handleChange}
+              className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm outline-none transition focus:border-[var(--accent)]"
+              placeholder="https://youtube.com/watch?v=... or youtu.be/..."
+            />
+          </div>
+
+          <div>
+            <label className="mb-1.5 block text-sm font-medium">
+              Screenshots (one URL per line)
+            </label>
+            <textarea
+              name="screenshots"
+              rows={3}
+              value={form.screenshots}
+              onChange={handleChange}
+              className="w-full resize-none rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm outline-none transition focus:border-[var(--accent)]"
+              placeholder={"https://res.cloudinary.com/.../shot1.png\nhttps://..."}
+            />
+            <p className="mt-1 text-xs text-[var(--muted)]">
+              Paste image URLs (Cloudinary or any public URL). Max 1MB per image when uploading.
+            </p>
           </div>
 
           <div>
