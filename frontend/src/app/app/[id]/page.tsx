@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+import { useSession } from "next-auth/react";
 import Link from "next/link";
 import Image from "next/image";
 import Header from "@/components/Header";
@@ -71,6 +72,7 @@ function PublisherAvatar({ src, name }: { src?: string; name?: string }) {
 export default function AppDetailPage() {
   const params = useParams();
   const id = params.id as string;
+  const { data: session } = useSession();
 
   const [app, setApp] = useState<App | null>(null);
   const [loading, setLoading] = useState(true);
@@ -143,9 +145,19 @@ export default function AppDetailPage() {
           <div className="flex items-start gap-4">
             <AppIcon src={app.icon_url} name={app.name} size={64} />
             <div className="min-w-0 flex-1">
-              <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
-                {app.name}
-              </h1>
+              <div className="flex items-start justify-between gap-3">
+                <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
+                  {app.name}
+                </h1>
+                {session && (
+                  <Link
+                    href={`/app/${app.id}/edit`}
+                    className="shrink-0 rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm font-medium transition hover:bg-[var(--card)]"
+                  >
+                    Edit
+                  </Link>
+                )}
+              </div>
               <div className="mt-2 flex items-center gap-2 text-sm text-[var(--muted)]">
                 <PublisherAvatar src={app.publisher_avatar} name={app.publisher} />
                 <span>Published by {app.publisher || "Anonymous"}</span>

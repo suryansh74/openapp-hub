@@ -123,6 +123,17 @@ export default function Header({ showPublish = true }: { showPublish?: boolean }
                       </p>
                     </div>
                     <div className="p-1.5">
+                      <Link
+                        href="/profile"
+                        onClick={() => setMenuOpen(false)}
+                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm transition hover:bg-[var(--card-hover)]"
+                      >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
+                          <circle cx="12" cy="7" r="4" />
+                        </svg>
+                        Profile
+                      </Link>
                       <button
                         onClick={() => {
                           setMenuOpen(false);

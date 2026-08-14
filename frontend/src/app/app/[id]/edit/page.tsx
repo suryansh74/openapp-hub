@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import Header from "@/components/Header";
@@ -10,13 +10,29 @@ import Footer from "@/components/Footer";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
-export default function PublishPage() {
+type App = {
+  id: string;
+  name: string;
+  problem: string;
+  significance: string;
+  how_to_use: string;
+  download_url: string;
+  icon_url: string;
+  publisher: string;
+  publisher_avatar: string;
+  user_id: string;
+};
+
+export default function EditAppPage() {
+  const params = useParams();
+  const id = params.id as string;
   const router = useRouter();
   const { data: session, status } = useSession();
   const { toast } = useToast();
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
 
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
   const [form, setForm] = useState({
     name: "",
     problem: "",
@@ -30,14 +46,32 @@ export default function PublishPage() {
   useEffect(() => {
     if (status === "unauthenticated") {
       router.push("/login");
+      return;
     }
-    if (session?.user) {
-      setForm((prev) => ({
-        ...prev,
-        publisher: session.user?.name || prev.publisher,
-      }));
-    }
-  }, [status, session, router]);
+    if (!id) return;
+
+    fetch(`${API_URL}/api/apps/${id}`)
+      .then((res) => {
+        if (!res.ok) throw new Error("App not found");
+        return res.json();
+      })
+      .then((data: App) => {
+        setForm({
+          name: data.name || "",
+          problem: data.problem || "",
+          significance: data.significance || "",
+          how_to_use: data.how_to_use || "",
+          download_url: data.download_url || "",
+          icon_url: data.icon_url || "",
+          publisher: data.publisher || "",
+        });
+        setLoading(false);
+      })
+      .catch((err) => {
+        setError(err.message);
+        setLoading(false);
+      });
+  }, [id, status, router]);
 
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
@@ -47,59 +81,58 @@ export default function PublishPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
+    setSaving(true);
     setError("");
 
     try {
-      // First ensure user exists in backend
-      if (session?.user?.email) {
-        await fetch(`${API_URL}/api/users`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            email: session.user.email,
-            name: session.user.name || "",
-            avatar_url: session.user.image || "",
-            provider: "oauth",
-          }),
-        });
-      }
+      // Keep publisher avatar in sync with current session image
+      const payload = {
+        ...form,
+        publisher_avatar: session?.user?.image || "",
+      };
 
-      const res = await fetch(`${API_URL}/api/apps`, {
-        method: "POST",
+      const res = await fetch(`${API_URL}/api/apps/${id}`, {
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...form,
-          user_email: session?.user?.email || "",
-          user_name: session?.user?.name || "",
-          user_avatar: session?.user?.image || "",
-          publisher_avatar: session?.user?.image || "",
-          provider: "oauth",
-        }),
+        body: JSON.stringify(payload),
       });
 
       if (!res.ok) {
         const text = await res.text();
-        throw new Error(text || "Failed to publish");
+        throw new Error(text || "Failed to update");
       }
 
-      const data = await res.json();
-      toast("App published successfully!", "success");
-      router.push(`/app/${data.id}`);
+      toast("App updated successfully!", "success");
+      router.push(`/app/${id}`);
     } catch (err: any) {
       const msg = err.message || "Something went wrong";
       setError(msg);
       toast(msg, "error");
-      setLoading(false);
+      setSaving(false);
     }
   };
 
-  if (status === "loading" || status === "unauthenticated") {
+  if (status === "loading" || loading) {
     return (
       <>
         <Header showPublish={false} />
         <main className="flex flex-1 items-center justify-center">
           <div className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--border)] border-t-[var(--accent)]" />
+        </main>
+        <Footer />
+      </>
+    );
+  }
+
+  if (error && !form.name) {
+    return (
+      <>
+        <Header showPublish={false} />
+        <main className="flex flex-1 flex-col items-center justify-center px-4">
+          <p className="text-lg text-[var(--muted)]">{error}</p>
+          <Link href="/" className="mt-4 text-sm text-[var(--accent)] hover:underline">
+            ← Back to home
+          </Link>
         </main>
         <Footer />
       </>
@@ -112,14 +145,14 @@ export default function PublishPage() {
       <main className="mx-auto w-full max-w-2xl flex-1 px-4 py-12">
         <div className="mb-8">
           <Link
-            href="/"
+            href={`/app/${id}`}
             className="mb-4 inline-block text-sm text-[var(--muted)] hover:text-[var(--foreground)]"
           >
-            ← Back
+            ← Back to app
           </Link>
-          <h1 className="text-3xl font-bold tracking-tight">Publish an app</h1>
+          <h1 className="text-3xl font-bold tracking-tight">Edit app</h1>
           <p className="mt-2 text-sm text-[var(--muted)]">
-            Help others discover your open-source project with a clear human-friendly description.
+            Update details, icon, or description.
           </p>
         </div>
 
@@ -134,7 +167,6 @@ export default function PublishPage() {
               value={form.name}
               onChange={handleChange}
               className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm outline-none transition focus:border-[var(--accent)]"
-              placeholder="e.g. Hour Tracker"
             />
           </div>
 
@@ -148,11 +180,21 @@ export default function PublishPage() {
               value={form.icon_url}
               onChange={handleChange}
               className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm outline-none transition focus:border-[var(--accent)]"
-              placeholder="https://... (optional – square image works best)"
+              placeholder="https://... (square image recommended)"
             />
-            <p className="mt-1 text-xs text-[var(--muted)]">
-              Leave empty to use a letter avatar. Prefer 128×128 or larger PNG/JPG/SVG.
-            </p>
+            {form.icon_url && (
+              <div className="mt-3 flex items-center gap-3">
+                <img
+                  src={form.icon_url}
+                  alt="Preview"
+                  className="h-12 w-12 rounded-xl object-cover border border-[var(--border)]"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).style.display = "none";
+                  }}
+                />
+                <span className="text-xs text-[var(--muted)]">Preview</span>
+              </div>
+            )}
           </div>
 
           <div>
@@ -166,7 +208,6 @@ export default function PublishPage() {
               value={form.problem}
               onChange={handleChange}
               className="w-full resize-none rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm outline-none transition focus:border-[var(--accent)]"
-              placeholder="What problem does this app solve in simple words?"
             />
           </div>
 
@@ -180,7 +221,6 @@ export default function PublishPage() {
               value={form.significance}
               onChange={handleChange}
               className="w-full resize-none rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm outline-none transition focus:border-[var(--accent)]"
-              placeholder="Who is it for and why is it useful?"
             />
           </div>
 
@@ -194,7 +234,6 @@ export default function PublishPage() {
               value={form.how_to_use}
               onChange={handleChange}
               className="w-full resize-none rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm outline-none transition focus:border-[var(--accent)]"
-              placeholder="Simple steps so a non-technical person can start using it..."
             />
           </div>
 
@@ -208,20 +247,18 @@ export default function PublishPage() {
               value={form.download_url}
               onChange={handleChange}
               className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm outline-none transition focus:border-[var(--accent)]"
-              placeholder="https://github.com/... or direct download"
             />
           </div>
 
           <div>
             <label className="mb-1.5 block text-sm font-medium">
-              Your name (Publisher)
+              Publisher name
             </label>
             <input
               name="publisher"
               value={form.publisher}
               onChange={handleChange}
               className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm outline-none transition focus:border-[var(--accent)]"
-              placeholder="Optional"
             />
           </div>
 
@@ -231,13 +268,21 @@ export default function PublishPage() {
             </p>
           )}
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full rounded-xl bg-[var(--accent)] px-4 py-3.5 font-medium text-white transition hover:bg-[var(--accent-hover)] disabled:opacity-50"
-          >
-            {loading ? "Publishing..." : "Publish App"}
-          </button>
+          <div className="flex gap-3">
+            <button
+              type="submit"
+              disabled={saving}
+              className="flex-1 rounded-xl bg-[var(--accent)] px-4 py-3.5 font-medium text-white transition hover:bg-[var(--accent-hover)] disabled:opacity-50"
+            >
+              {saving ? "Saving..." : "Save changes"}
+            </button>
+            <Link
+              href={`/app/${id}`}
+              className="rounded-xl border border-[var(--border)] px-4 py-3.5 text-sm font-medium transition hover:bg-[var(--card)]"
+            >
+              Cancel
+            </Link>
+          </div>
         </form>
       </main>
       <Footer />

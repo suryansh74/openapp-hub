@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,6 +14,16 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
+
+type User struct {
+	ID        string    `json:"id" gorm:"primaryKey"`
+	Email     string    `json:"email" gorm:"uniqueIndex;not null"`
+	Name      string    `json:"name"`
+	AvatarURL string    `json:"avatar_url"`
+	Provider  string    `json:"provider"` // google, github
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
 
 type App struct {
 	ID              string    `json:"id" gorm:"primaryKey"`
@@ -24,21 +35,22 @@ type App struct {
 	IconURL         string    `json:"icon_url"`
 	Publisher       string    `json:"publisher"`
 	PublisherAvatar string    `json:"publisher_avatar"`
+	UserID          string    `json:"user_id" gorm:"index"` // links to User
 	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 // BacklogItem is a flexible store for future features / reserved work.
-// Extra fields go into Meta (JSONB) so the schema can grow without migrations.
 type BacklogItem struct {
 	ID          string         `json:"id" gorm:"primaryKey"`
 	Title       string         `json:"title" gorm:"not null"`
 	Description string         `json:"description"`
-	Category    string         `json:"category"` // e.g. auth, ai, ui, infra, search
-	Priority    string         `json:"priority"` // low, medium, high, critical
-	Status      string         `json:"status" gorm:"default:reserved"` // reserved, in_progress, done, cancelled
-	Stage       string         `json:"stage"`    // e.g. stage2, stage3, stage4, later
+	Category    string         `json:"category"`
+	Priority    string         `json:"priority"`
+	Status      string         `json:"status" gorm:"default:reserved"`
+	Stage       string         `json:"stage"`
 	Done        bool           `json:"done" gorm:"default:false"`
-	Meta        datatypes.JSON `json:"meta" gorm:"type:jsonb;default:'{}'"` // flexible extra data
+	Meta        datatypes.JSON `json:"meta" gorm:"type:jsonb;default:'{}'"`
 	CreatedAt   time.Time      `json:"created_at"`
 	UpdatedAt   time.Time      `json:"updated_at"`
 }
@@ -47,8 +59,8 @@ var db *gorm.DB
 
 func enableCORS(w http.ResponseWriter) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 }
 
 func listApps(w http.ResponseWriter, r *http.Request) {
@@ -75,7 +87,7 @@ func getApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := r.URL.Path[len("/api/apps/"):]
+	id := strings.TrimPrefix(r.URL.Path, "/api/apps/")
 	if id == "" {
 		http.Error(w, "missing id", http.StatusBadRequest)
 		return
@@ -97,7 +109,6 @@ func createApp(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -112,6 +123,10 @@ func createApp(w http.ResponseWriter, r *http.Request) {
 		IconURL         string `json:"icon_url"`
 		Publisher       string `json:"publisher"`
 		PublisherAvatar string `json:"publisher_avatar"`
+		UserEmail       string `json:"user_email"` // used to link / upsert user
+		UserName        string `json:"user_name"`
+		UserAvatar      string `json:"user_avatar"`
+		Provider        string `json:"provider"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
@@ -124,6 +139,47 @@ func createApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	now := time.Now().UTC()
+	userID := ""
+
+	// Upsert user if email is provided
+	if input.UserEmail != "" {
+		var user User
+		err := db.Where("email = ?", input.UserEmail).First(&user).Error
+		if err == gorm.ErrRecordNotFound {
+			user = User{
+				ID:        uuid.New().String(),
+				Email:     input.UserEmail,
+				Name:      input.UserName,
+				AvatarURL: input.UserAvatar,
+				Provider:  input.Provider,
+				CreatedAt: now,
+				UpdatedAt: now,
+			}
+			db.Create(&user)
+		} else if err == nil {
+			// Update name/avatar if changed
+			updates := map[string]interface{}{"updated_at": now}
+			if input.UserName != "" {
+				updates["name"] = input.UserName
+			}
+			if input.UserAvatar != "" {
+				updates["avatar_url"] = input.UserAvatar
+			}
+			db.Model(&user).Updates(updates)
+			db.First(&user, "id = ?", user.ID)
+		}
+		userID = user.ID
+
+		// Prefer the stored user avatar for the app
+		if user.AvatarURL != "" {
+			input.PublisherAvatar = user.AvatarURL
+		}
+		if user.Name != "" && input.Publisher == "" {
+			input.Publisher = user.Name
+		}
+	}
+
 	app := App{
 		ID:              uuid.New().String(),
 		Name:            input.Name,
@@ -134,7 +190,9 @@ func createApp(w http.ResponseWriter, r *http.Request) {
 		IconURL:         input.IconURL,
 		Publisher:       input.Publisher,
 		PublisherAvatar: input.PublisherAvatar,
-		CreatedAt:       time.Now().UTC(),
+		UserID:          userID,
+		CreatedAt:       now,
+		UpdatedAt:       now,
 	}
 
 	if err := db.Create(&app).Error; err != nil {
@@ -147,7 +205,138 @@ func createApp(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(app)
 }
 
-// --- Backlog (future / reserved features) ---
+func updateApp(w http.ResponseWriter, r *http.Request) {
+	enableCORS(w)
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if r.Method != http.MethodPatch && r.Method != http.MethodPut {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	id := strings.TrimPrefix(r.URL.Path, "/api/apps/")
+	if id == "" {
+		http.Error(w, "missing id", http.StatusBadRequest)
+		return
+	}
+
+	var app App
+	if err := db.First(&app, "id = ?", id).Error; err != nil {
+		http.Error(w, "app not found", http.StatusNotFound)
+		return
+	}
+
+	var input map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+
+	updates := map[string]interface{}{"updated_at": time.Now().UTC()}
+	allowed := []string{"name", "problem", "significance", "how_to_use", "download_url", "icon_url", "publisher", "publisher_avatar"}
+	for _, key := range allowed {
+		if v, ok := input[key]; ok {
+			updates[key] = v
+		}
+	}
+
+	if err := db.Model(&app).Updates(updates).Error; err != nil {
+		http.Error(w, "failed to update", http.StatusInternalServerError)
+		return
+	}
+
+	db.First(&app, "id = ?", id)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(app)
+}
+
+// --- Users ---
+
+func upsertUser(w http.ResponseWriter, r *http.Request) {
+	enableCORS(w)
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	if r.Method == http.MethodGet {
+		email := r.URL.Query().Get("email")
+		if email == "" {
+			http.Error(w, "email required", http.StatusBadRequest)
+			return
+		}
+		var user User
+		if err := db.Where("email = ?", email).First(&user).Error; err != nil {
+			http.Error(w, "user not found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(user)
+		return
+	}
+
+	if r.Method != http.MethodPost && r.Method != http.MethodPut {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var input struct {
+		Email     string `json:"email"`
+		Name      string `json:"name"`
+		AvatarURL string `json:"avatar_url"`
+		Provider  string `json:"provider"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	if input.Email == "" {
+		http.Error(w, "email is required", http.StatusBadRequest)
+		return
+	}
+
+	now := time.Now().UTC()
+	var user User
+	err := db.Where("email = ?", input.Email).First(&user).Error
+	if err == gorm.ErrRecordNotFound {
+		user = User{
+			ID:        uuid.New().String(),
+			Email:     input.Email,
+			Name:      input.Name,
+			AvatarURL: input.AvatarURL,
+			Provider:  input.Provider,
+			CreatedAt: now,
+			UpdatedAt: now,
+		}
+		if err := db.Create(&user).Error; err != nil {
+			http.Error(w, "failed to create user", http.StatusInternalServerError)
+			return
+		}
+	} else if err == nil {
+		updates := map[string]interface{}{"updated_at": now}
+		if input.Name != "" {
+			updates["name"] = input.Name
+		}
+		if input.AvatarURL != "" {
+			updates["avatar_url"] = input.AvatarURL
+		}
+		if input.Provider != "" {
+			updates["provider"] = input.Provider
+		}
+		db.Model(&user).Updates(updates)
+		db.First(&user, "id = ?", user.ID)
+	} else {
+		http.Error(w, "database error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(user)
+}
+
+// --- Backlog ---
 
 func listBacklog(w http.ResponseWriter, r *http.Request) {
 	enableCORS(w)
@@ -226,6 +415,7 @@ func createBacklog(w http.ResponseWriter, r *http.Request) {
 		metaBytes = []byte("{}")
 	}
 
+	now := time.Now().UTC()
 	item := BacklogItem{
 		ID:          uuid.New().String(),
 		Title:       input.Title,
@@ -236,8 +426,8 @@ func createBacklog(w http.ResponseWriter, r *http.Request) {
 		Stage:       input.Stage,
 		Done:        done,
 		Meta:        datatypes.JSON(metaBytes),
-		CreatedAt:   time.Now().UTC(),
-		UpdatedAt:   time.Now().UTC(),
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}
 
 	if err := db.Create(&item).Error; err != nil {
@@ -261,7 +451,7 @@ func updateBacklog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := r.URL.Path[len("/api/backlog/"):]
+	id := strings.TrimPrefix(r.URL.Path, "/api/backlog/")
 	if id == "" {
 		http.Error(w, "missing id", http.StatusBadRequest)
 		return
@@ -279,7 +469,6 @@ func updateBacklog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Flexible updates – only touch provided fields
 	updates := map[string]interface{}{"updated_at": time.Now().UTC()}
 	for _, key := range []string{"title", "description", "category", "priority", "status", "stage"} {
 		if v, ok := input[key]; ok {
@@ -321,11 +510,11 @@ func main() {
 		log.Fatal("failed to connect to database:", err)
 	}
 
-	if err := db.AutoMigrate(&App{}, &BacklogItem{}); err != nil {
+	if err := db.AutoMigrate(&User{}, &App{}, &BacklogItem{}); err != nil {
 		log.Fatal("failed to migrate database:", err)
 	}
 
-	log.Println("Connected to Neon database successfully")
+	log.Println("Connected to database successfully")
 
 	http.HandleFunc("/api/apps", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet || r.Method == http.MethodOptions {
@@ -339,7 +528,20 @@ func main() {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	})
 
-	http.HandleFunc("/api/apps/", getApp)
+	http.HandleFunc("/api/apps/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet || r.Method == http.MethodOptions {
+			getApp(w, r)
+			return
+		}
+		if r.Method == http.MethodPatch || r.Method == http.MethodPut {
+			updateApp(w, r)
+			return
+		}
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	})
+
+	http.HandleFunc("/api/users", upsertUser)
+	http.HandleFunc("/api/user", upsertUser) // alias
 
 	http.HandleFunc("/api/backlog", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet || r.Method == http.MethodOptions {
