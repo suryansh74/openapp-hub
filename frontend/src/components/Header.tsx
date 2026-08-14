@@ -82,12 +82,13 @@ export default function Header({ showPublish = true }: { showPublish?: boolean }
                   className="flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--card)] p-0.5 pr-2 transition hover:bg-[var(--card-hover)] sm:pr-2.5"
                 >
                   {session.user.image ? (
-                    <Image
+                    <img
                       src={session.user.image}
                       alt={session.user.name || "User"}
                       width={32}
                       height={32}
-                      className="rounded-full"
+                      className="h-8 w-8 rounded-full object-cover"
+                      referrerPolicy="no-referrer"
                     />
                   ) : (
                     <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--accent)] text-sm font-medium text-white">
@@ -122,16 +123,6 @@ export default function Header({ showPublish = true }: { showPublish?: boolean }
                       </p>
                     </div>
                     <div className="p-1.5">
-                      <Link
-                        href="/publish"
-                        onClick={() => setMenuOpen(false)}
-                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm transition hover:bg-[var(--card-hover)]"
-                      >
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <path d="M12 5v14M5 12h14" />
-                        </svg>
-                        Publish an App
-                      </Link>
                       <button
                         onClick={() => {
                           setMenuOpen(false);
