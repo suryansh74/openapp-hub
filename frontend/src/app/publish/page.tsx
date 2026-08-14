@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
 import Header from "@/components/Header";
+import { useToast } from "@/components/Toast";
 import Footer from "@/components/Footer";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
@@ -12,6 +13,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 export default function PublishPage() {
   const router = useRouter();
   const { data: session, status } = useSession();
+  const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -57,9 +59,12 @@ export default function PublishPage() {
       }
 
       const data = await res.json();
+      toast("App published successfully!", "success");
       router.push(`/app/${data.id}`);
     } catch (err: any) {
-      setError(err.message || "Something went wrong");
+      const msg = err.message || "Something went wrong";
+      setError(msg);
+      toast(msg, "error");
       setLoading(false);
     }
   };
