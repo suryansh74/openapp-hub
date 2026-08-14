@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
+import Header from "@/components/Header";
+import Footer from "@/components/Footer";
 
 type App = {
   id: string;
@@ -45,53 +47,49 @@ export default function AppDetailPage() {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--border)] border-t-[var(--accent)]" />
-      </div>
+      <>
+        <Header showPublish={false} />
+        <main className="flex flex-1 items-center justify-center">
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--border)] border-t-[var(--accent)]" />
+        </main>
+        <Footer />
+      </>
     );
   }
 
   if (error || !app) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center px-4">
-        <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] px-8 py-12 text-center">
-          <p className="text-lg text-[var(--muted)]">
-            {error || "App not found"}
-          </p>
-          <Link
-            href="/"
-            className="mt-4 inline-block text-sm font-medium text-[var(--accent)] hover:underline"
-          >
-            ← Back to home
-          </Link>
-        </div>
-      </div>
+      <>
+        <Header showPublish={false} />
+        <main className="flex flex-1 flex-col items-center justify-center px-4">
+          <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] px-8 py-12 text-center">
+            <p className="text-lg text-[var(--muted)]">
+              {error || "App not found"}
+            </p>
+            <Link
+              href="/"
+              className="mt-4 inline-block text-sm font-medium text-[var(--accent)] hover:underline"
+            >
+              ← Back to home
+            </Link>
+          </div>
+        </main>
+        <Footer />
+      </>
     );
   }
 
   return (
-    <div className="min-h-screen">
-      <header className="sticky top-0 z-50 border-b border-[var(--border)] bg-[var(--background)]/80 backdrop-blur-md">
-        <div className="mx-auto flex max-w-2xl items-center justify-between px-4 py-4">
-          <Link href="/" className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--accent)] text-sm font-bold text-white">
-              O
-            </div>
-            <span className="text-lg font-semibold tracking-tight">
-              OpenApp Hub
-            </span>
-          </Link>
+    <>
+      <Header showPublish={false} />
+      <main className="mx-auto w-full max-w-2xl flex-1 px-4 py-12">
+        <div className="mb-8">
           <Link
             href="/"
-            className="text-sm text-[var(--muted)] transition hover:text-white"
+            className="mb-4 inline-block text-sm text-[var(--muted)] hover:text-[var(--foreground)]"
           >
             ← All apps
           </Link>
-        </div>
-      </header>
-
-      <main className="mx-auto max-w-2xl px-4 py-12">
-        <div className="mb-8">
           <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
             {app.name}
           </h1>
@@ -102,20 +100,20 @@ export default function AppDetailPage() {
 
         <div className="space-y-4">
           <section className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-6">
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--muted)]">
               Problem it solves
             </h2>
-            <p className="mt-3 whitespace-pre-wrap leading-relaxed text-zinc-200">
+            <p className="mt-3 whitespace-pre-wrap leading-relaxed">
               {app.problem}
             </p>
           </section>
 
           {app.significance && (
             <section className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-6">
-              <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
+              <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--muted)]">
                 Why it matters
               </h2>
-              <p className="mt-3 whitespace-pre-wrap leading-relaxed text-zinc-200">
+              <p className="mt-3 whitespace-pre-wrap leading-relaxed">
                 {app.significance}
               </p>
             </section>
@@ -123,10 +121,10 @@ export default function AppDetailPage() {
 
           {app.how_to_use && (
             <section className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-6">
-              <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
+              <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--muted)]">
                 How to use it
               </h2>
-              <p className="mt-3 whitespace-pre-wrap leading-relaxed text-zinc-200">
+              <p className="mt-3 whitespace-pre-wrap leading-relaxed">
                 {app.how_to_use}
               </p>
             </section>
@@ -147,6 +145,7 @@ export default function AppDetailPage() {
           </div>
         )}
       </main>
-    </div>
+      <Footer />
+    </>
   );
 }

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { ThemeProvider } from "@/components/ThemeProvider";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -15,6 +16,9 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "OpenApp Hub",
   description: "Simple human-first open-source application store",
+  icons: {
+    icon: "/icon.svg",
+  },
 };
 
 export default function RootLayout({
@@ -23,11 +27,15 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en" suppressHydrationWarning>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} min-h-screen antialiased bg-[var(--background)] text-[var(--foreground)]`}
+        className={`${geistSans.variable} ${geistMono.variable} min-h-screen antialiased`}
       >
-        {children}
+        <ThemeProvider>
+          <div className="flex min-h-screen flex-col">
+            {children}
+          </div>
+        </ThemeProvider>
       </body>
     </html>
   );

@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import Header from "@/components/Header";
+import Footer from "@/components/Footer";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
@@ -52,28 +54,16 @@ export default function PublishPage() {
   };
 
   return (
-    <div className="min-h-screen">
-      <header className="sticky top-0 z-50 border-b border-[var(--border)] bg-[var(--background)]/80 backdrop-blur-md">
-        <div className="mx-auto flex max-w-2xl items-center justify-between px-4 py-4">
-          <Link href="/" className="flex items-center gap-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--accent)] text-sm font-bold text-white">
-              O
-            </div>
-            <span className="text-lg font-semibold tracking-tight">
-              OpenApp Hub
-            </span>
-          </Link>
+    <>
+      <Header showPublish={false} />
+      <main className="mx-auto w-full max-w-2xl flex-1 px-4 py-12">
+        <div className="mb-8">
           <Link
             href="/"
-            className="text-sm text-[var(--muted)] hover:text-white transition"
+            className="mb-4 inline-block text-sm text-[var(--muted)] hover:text-[var(--foreground)]"
           >
             ← Back
           </Link>
-        </div>
-      </header>
-
-      <main className="mx-auto max-w-2xl px-4 py-12">
-        <div className="mb-8">
           <h1 className="text-3xl font-bold tracking-tight">Publish an App</h1>
           <p className="mt-2 text-[var(--muted)]">
             Keep it simple. Focus on the problem your software solves and how
@@ -84,7 +74,7 @@ export default function PublishPage() {
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>
             <label className="mb-1.5 block text-sm font-medium">
-              App Name <span className="text-red-400">*</span>
+              App Name <span className="text-red-500">*</span>
             </label>
             <input
               name="name"
@@ -98,7 +88,7 @@ export default function PublishPage() {
 
           <div>
             <label className="mb-1.5 block text-sm font-medium">
-              What problem does it solve? <span className="text-red-400">*</span>
+              What problem does it solve? <span className="text-red-500">*</span>
             </label>
             <textarea
               name="problem"
@@ -106,7 +96,7 @@ export default function PublishPage() {
               rows={3}
               value={form.problem}
               onChange={handleChange}
-              className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm outline-none transition focus:border-[var(--accent)] resize-none"
+              className="w-full resize-none rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm outline-none transition focus:border-[var(--accent)]"
               placeholder="Describe the real problem this app fixes..."
             />
           </div>
@@ -120,7 +110,7 @@ export default function PublishPage() {
               rows={3}
               value={form.significance}
               onChange={handleChange}
-              className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm outline-none transition focus:border-[var(--accent)] resize-none"
+              className="w-full resize-none rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm outline-none transition focus:border-[var(--accent)]"
               placeholder="Who is it for and why is it useful?"
             />
           </div>
@@ -134,7 +124,7 @@ export default function PublishPage() {
               rows={4}
               value={form.how_to_use}
               onChange={handleChange}
-              className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm outline-none transition focus:border-[var(--accent)] resize-none"
+              className="w-full resize-none rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm outline-none transition focus:border-[var(--accent)]"
               placeholder="Simple steps so a non-technical person can start using it..."
             />
           </div>
@@ -167,7 +157,7 @@ export default function PublishPage() {
           </div>
 
           {error && (
-            <p className="rounded-lg bg-red-500/10 px-4 py-3 text-sm text-red-400">
+            <p className="rounded-lg bg-red-500/10 px-4 py-3 text-sm text-red-500">
               {error}
             </p>
           )}
@@ -181,6 +171,7 @@ export default function PublishPage() {
           </button>
         </form>
       </main>
-    </div>
+      <Footer />
+    </>
   );
 }
