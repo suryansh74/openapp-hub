@@ -541,7 +541,7 @@ func uploadImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if cld == nil {
-		http.Error(w, "cloudinary not configured", http.StatusServiceUnavailable)
+		http.Error(w, "cloudinary not configured — set CLOUDINARY_URL on the API service and redeploy", http.StatusServiceUnavailable)
 		return
 	}
 
@@ -662,17 +662,39 @@ func main() {
 	}
 	log.Println("Connected to database successfully")
 
-	// Cloudinary (optional)
-	if cloudinaryURL := os.Getenv("CLOUDINARY_URL"); cloudinaryURL != "" {
+	// Cloudinary (optional) — supports CLOUDINARY_URL or separate keys
+	cloudinaryURL := strings.TrimSpace(os.Getenv("CLOUDINARY_URL"))
+	if cloudinaryURL != "" {
 		cld, err = cloudinary.NewFromURL(cloudinaryURL)
 		if err != nil {
-			log.Println("warning: cloudinary init failed:", err)
+			log.Println("WARNING: cloudinary.NewFromURL failed:", err)
+			prefix := cloudinaryURL
+			if len(prefix) > 30 {
+				prefix = prefix[:30] + "..."
+			}
+			log.Println("CLOUDINARY_URL present, length:", len(cloudinaryURL), "value starts with:", prefix)
 		} else {
 			cld.Config.URL.Secure = true
-			log.Println("Cloudinary configured")
+			log.Println("Cloudinary configured via CLOUDINARY_URL")
 		}
-	} else {
-		log.Println("CLOUDINARY_URL not set – image upload disabled")
+	}
+	// Fallback: separate env vars
+	if cld == nil {
+		cloudName := strings.TrimSpace(os.Getenv("CLOUDINARY_CLOUD_NAME"))
+		apiKey := strings.TrimSpace(os.Getenv("CLOUDINARY_API_KEY"))
+		apiSecret := strings.TrimSpace(os.Getenv("CLOUDINARY_API_SECRET"))
+		if cloudName != "" && apiKey != "" && apiSecret != "" {
+			cld, err = cloudinary.NewFromParams(cloudName, apiKey, apiSecret)
+			if err != nil {
+				log.Println("WARNING: cloudinary.NewFromParams failed:", err)
+			} else {
+				cld.Config.URL.Secure = true
+				log.Println("Cloudinary configured via CLOUDINARY_CLOUD_NAME/API_KEY/API_SECRET")
+			}
+		}
+	}
+	if cld == nil {
+		log.Println("Cloudinary NOT configured – image upload will return 503")
 	}
 
 	http.HandleFunc("/api/apps", func(w http.ResponseWriter, r *http.Request) {
@@ -734,7 +756,15 @@ func main() {
 		if sqlDB, err := db.DB(); err != nil || sqlDB.Ping() != nil {
 			status = "database connection problem"
 		}
-		json.NewEncoder(w).Encode(map[string]string{"status": status, "service": "openapp-hub-api"})
+		cloudinaryStatus := "not configured"
+		if cld != nil {
+			cloudinaryStatus = "ok"
+		}
+		json.NewEncoder(w).Encode(map[string]string{
+			"status":     status,
+			"service":    "openapp-hub-api",
+			"cloudinary": cloudinaryStatus,
+		})
 	})
 
 	port := os.Getenv("PORT")
