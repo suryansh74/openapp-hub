@@ -281,6 +281,38 @@ func voteHandler(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
+
+	// GET /api/vote?user_email=...&app_id=...
+	// Returns map of "app:<id>" or "comment:<id>" -> 1 | -1 for this user's votes
+	if r.Method == http.MethodGet {
+		email := r.URL.Query().Get("user_email")
+		appID := r.URL.Query().Get("app_id")
+		if email == "" {
+			http.Error(w, "user_email required", http.StatusBadRequest)
+			return
+		}
+		var votes []Vote
+		q := db.Where("user_email = ?", email)
+		if appID != "" {
+			// app vote + all comment votes for comments on this app
+			var commentIDs []string
+			db.Model(&Comment{}).Where("app_id = ?", appID).Pluck("id", &commentIDs)
+			ids := append([]string{appID}, commentIDs...)
+			q = q.Where("target_id IN ?", ids)
+		}
+		if err := q.Find(&votes).Error; err != nil {
+			http.Error(w, "failed to fetch votes", http.StatusInternalServerError)
+			return
+		}
+		out := map[string]int{}
+		for _, v := range votes {
+			out[v.TargetType+":"+v.TargetID] = v.Value
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(out)
+		return
+	}
+
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -328,15 +360,20 @@ func voteHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// return updated counts
+	// return updated counts + current user vote (0 if removed)
+	myVote := 0
+	var check Vote
+	if err := db.Where("user_email = ? AND target_type = ? AND target_id = ?", input.UserEmail, input.TargetType, input.TargetID).First(&check).Error; err == nil {
+		myVote = check.Value
+	}
 	if input.TargetType == "app" {
 		var app App
 		db.First(&app, "id = ?", input.TargetID)
-		json.NewEncoder(w).Encode(map[string]int{"likes_count": app.LikesCount, "dislikes_count": app.DislikesCount})
+		json.NewEncoder(w).Encode(map[string]int{"likes_count": app.LikesCount, "dislikes_count": app.DislikesCount, "my_vote": myVote})
 	} else {
 		var c Comment
 		db.First(&c, "id = ?", input.TargetID)
-		json.NewEncoder(w).Encode(map[string]int{"likes_count": c.LikesCount, "dislikes_count": c.DislikesCount})
+		json.NewEncoder(w).Encode(map[string]int{"likes_count": c.LikesCount, "dislikes_count": c.DislikesCount, "my_vote": myVote})
 	}
 }
 

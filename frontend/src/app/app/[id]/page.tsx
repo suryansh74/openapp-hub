@@ -202,7 +202,7 @@ function ScreenshotSlider({
       </div>
 
       {/* Image area */}
-      <div className="relative flex flex-1 items-center justify-center px-12 sm:px-16">
+      <div className="relative flex flex-1 items-center justify-center px-10 sm:px-12">
         {/* Prev button */}
         {total > 1 && (
           <button
@@ -210,7 +210,7 @@ function ScreenshotSlider({
               e.stopPropagation();
               goPrev();
             }}
-            className="absolute left-2 z-10 flex h-11 w-11 items-center justify-center rounded-full bg-white/10 text-white backdrop-blur transition hover:bg-white/20 sm:left-4"
+            className="absolute left-1 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-white backdrop-blur transition hover:bg-white/30 sm:left-2"
             aria-label="Previous"
           >
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -234,7 +234,7 @@ function ScreenshotSlider({
               e.stopPropagation();
               goNext();
             }}
-            className="absolute right-2 z-10 flex h-11 w-11 items-center justify-center rounded-full bg-white/10 text-white backdrop-blur transition hover:bg-white/20 sm:right-4"
+            className="absolute right-1 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-white/15 text-white backdrop-blur transition hover:bg-white/30 sm:right-2"
             aria-label="Next"
           >
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -267,6 +267,160 @@ function ScreenshotSlider({
 }
 
 
+
+function CommentNode({
+  comment: c,
+  depth,
+  allComments,
+  myVotes,
+  session,
+  voting,
+  editingId,
+  editText,
+  replyTo,
+  replyText,
+  submitting,
+  onVote,
+  onStartEdit,
+  onSaveEdit,
+  onCancelEdit,
+  onDelete,
+  onReplyToggle,
+  onReplyText,
+  onSubmitReply,
+  setEditText,
+}: {
+  comment: Comment;
+  depth: number;
+  allComments: Comment[];
+  myVotes: Record<string, number>;
+  session: any;
+  voting: boolean;
+  editingId: string | null;
+  editText: string;
+  replyTo: string | null;
+  replyText: string;
+  submitting: boolean;
+  onVote: (t: "app" | "comment", id: string, v: 1 | -1) => void;
+  onStartEdit: (c: Comment) => void;
+  onSaveEdit: (id: string) => void;
+  onCancelEdit: () => void;
+  onDelete: (id: string) => void;
+  onReplyToggle: (id: string) => void;
+  onReplyText: (t: string) => void;
+  onSubmitReply: (parentId: string) => void;
+  setEditText: (t: string) => void;
+}) {
+  const children = allComments.filter((x) => x.parent_id === c.id);
+  const myLike = myVotes[`comment:${c.id}`] === 1;
+  const myDislike = myVotes[`comment:${c.id}`] === -1;
+  const isOwner = session?.user?.name === c.author_name;
+  const maxDepthPad = Math.min(depth, 6);
+
+  return (
+    <div className={depth > 0 ? "mt-4 border-l-2 border-[var(--border)] pl-3 sm:pl-4" : ""}>
+      <div className="flex gap-3">
+        <Avatar src={c.author_avatar} name={c.author_name} size={depth > 0 ? 24 : 28} />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 text-sm">
+            <span className="font-medium">{c.author_name || "Anonymous"}</span>
+            <span className="text-xs text-[var(--muted)]">{timeAgo(c.created_at)}</span>
+          </div>
+          {editingId === c.id ? (
+            <div className="mt-2">
+              <textarea
+                value={editText}
+                onChange={(e) => setEditText(e.target.value)}
+                rows={3}
+                className="w-full resize-none rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)]"
+              />
+              <div className="mt-2 flex gap-2">
+                <button onClick={() => onSaveEdit(c.id)} className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs text-white">Save</button>
+                <button onClick={onCancelEdit} className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs">Cancel</button>
+              </div>
+            </div>
+          ) : (
+            <p className="mt-1 text-sm leading-relaxed whitespace-pre-wrap">{c.content}</p>
+          )}
+          <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-[var(--muted)]">
+            <button
+              onClick={() => onVote("comment", c.id, 1)}
+              disabled={voting}
+              className={`inline-flex items-center gap-1 disabled:opacity-50 ${myLike ? "font-semibold text-emerald-400" : "hover:text-emerald-500"}`}
+            >
+              ▲ {c.likes_count || 0}
+            </button>
+            <button
+              onClick={() => onVote("comment", c.id, -1)}
+              disabled={voting}
+              className={`inline-flex items-center gap-1 disabled:opacity-50 ${myDislike ? "font-semibold text-red-400" : "hover:text-red-500"}`}
+            >
+              ▼ {c.dislikes_count || 0}
+            </button>
+            {session && (
+              <button onClick={() => onReplyToggle(c.id)} className="hover:text-[var(--foreground)]">
+                Reply
+              </button>
+            )}
+            {isOwner && editingId !== c.id && (
+              <>
+                <button onClick={() => onStartEdit(c)} className="hover:text-[var(--foreground)]">Edit</button>
+                <button onClick={() => onDelete(c.id)} className="hover:text-red-500">Delete</button>
+              </>
+            )}
+          </div>
+
+          {replyTo === c.id && (
+            <div className="mt-3 flex gap-2">
+              <textarea
+                value={replyText}
+                onChange={(e) => onReplyText(e.target.value)}
+                rows={2}
+                placeholder="Write a reply..."
+                className="flex-1 resize-none rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)]"
+              />
+              <button
+                onClick={() => onSubmitReply(c.id)}
+                disabled={submitting || !replyText.trim()}
+                className="self-end rounded-lg bg-[var(--accent)] px-3 py-2 text-sm text-white disabled:opacity-50"
+              >
+                Reply
+              </button>
+            </div>
+          )}
+
+          {children.map((child) => (
+            <CommentNode
+              key={child.id}
+              comment={child}
+              depth={depth + 1}
+              allComments={allComments}
+              myVotes={myVotes}
+              session={session}
+              voting={voting}
+              editingId={editingId}
+              editText={editText}
+              replyTo={replyTo}
+              replyText={replyText}
+              submitting={submitting}
+              onVote={onVote}
+              onStartEdit={onStartEdit}
+              onSaveEdit={onSaveEdit}
+              onCancelEdit={onCancelEdit}
+              onDelete={onDelete}
+              onReplyToggle={onReplyToggle}
+              onReplyText={onReplyText}
+              onSubmitReply={onSubmitReply}
+              setEditText={setEditText}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 export default function AppDetailPage() {
   const params = useParams();
   const id = params.id as string;
@@ -285,6 +439,8 @@ export default function AppDetailPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
   const [voting, setVoting] = useState(false);
+  // map "app:id" | "comment:id" -> 1 | -1
+  const [myVotes, setMyVotes] = useState<Record<string, number>>({});
 
   const loadComments = useCallback(() => {
     if (!id) return;
@@ -312,6 +468,20 @@ export default function AppDetailPage() {
     loadComments();
   }, [id, loadComments]);
 
+  // Load this user's existing votes for app + comments
+  useEffect(() => {
+    if (!id || !session?.user?.email) {
+      setMyVotes({});
+      return;
+    }
+    fetch(`${API_URL}/api/vote?user_email=${encodeURIComponent(session.user.email)}&app_id=${id}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data && typeof data === "object") setMyVotes(data);
+      })
+      .catch(() => setMyVotes({}));
+  }, [id, session?.user?.email]);
+
   const handleVote = async (targetType: "app" | "comment", targetId: string, value: 1 | -1) => {
     if (!session?.user?.email) {
       toast("Please sign in to vote", "error");
@@ -332,6 +502,13 @@ export default function AppDetailPage() {
       });
       if (!res.ok) throw new Error("vote failed");
       const data = await res.json();
+      const key = `${targetType}:${targetId}`;
+      setMyVotes((prev) => {
+        const next = { ...prev };
+        if (data.my_vote === 1 || data.my_vote === -1) next[key] = data.my_vote;
+        else delete next[key];
+        return next;
+      });
       if (targetType === "app" && app) {
         setApp({ ...app, likes_count: data.likes_count ?? 0, dislikes_count: data.dislikes_count ?? 0 });
       } else {
@@ -444,7 +621,6 @@ export default function AppDetailPage() {
   const screenshots = parseScreenshots(app.screenshots);
   const embedUrl = getYoutubeEmbed(app.youtube_url || "");
   const topComments = comments.filter((c) => !c.parent_id);
-  const getReplies = (parentId: string) => comments.filter((c) => c.parent_id === parentId);
 
   return (
     <>
@@ -476,9 +652,13 @@ export default function AppDetailPage() {
               <button
                 onClick={() => handleVote("app", app.id, 1)}
                 disabled={voting}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 text-sm transition hover:border-emerald-500/40 hover:bg-emerald-500/10 disabled:opacity-50"
+                className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm transition disabled:opacity-50 ${
+                  myVotes[`app:${app.id}`] === 1
+                    ? "border-emerald-500/50 bg-emerald-500/20 text-emerald-400"
+                    : "border-[var(--border)] bg-[var(--card)] hover:border-emerald-500/40 hover:bg-emerald-500/10"
+                }`}
               >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill={myVotes[`app:${app.id}`] === 1 ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2">
                   <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
                 </svg>
                 {app.likes_count || 0}
@@ -486,9 +666,13 @@ export default function AppDetailPage() {
               <button
                 onClick={() => handleVote("app", app.id, -1)}
                 disabled={voting}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 text-sm transition hover:border-red-500/40 hover:bg-red-500/10 disabled:opacity-50"
+                className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm transition disabled:opacity-50 ${
+                  myVotes[`app:${app.id}`] === -1
+                    ? "border-red-500/50 bg-red-500/20 text-red-400"
+                    : "border-[var(--border)] bg-[var(--card)] hover:border-red-500/40 hover:bg-red-500/10"
+                }`}
               >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill={myVotes[`app:${app.id}`] === -1 ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2">
                   <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10zM17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17" />
                 </svg>
                 {app.dislikes_count || 0}
@@ -623,130 +807,35 @@ export default function AppDetailPage() {
                 </p>
               )}
 
-              {/* Comment list */}
+              {/* Comment list — recursive nesting */}
               <div className="space-y-5">
                 {topComments.length === 0 && (
                   <p className="text-sm text-[var(--muted)]">No comments yet. Be the first!</p>
                 )}
                 {topComments.map((c) => (
-                  <div key={c.id}>
-                    <div className="flex gap-3">
-                      <Avatar src={c.author_avatar} name={c.author_name} />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2 text-sm">
-                          <span className="font-medium">{c.author_name || "Anonymous"}</span>
-                          <span className="text-xs text-[var(--muted)]">{timeAgo(c.created_at)}</span>
-                        </div>
-                        {editingId === c.id ? (
-                          <div className="mt-2">
-                            <textarea
-                              value={editText}
-                              onChange={(e) => setEditText(e.target.value)}
-                              rows={3}
-                              className="w-full resize-none rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)]"
-                            />
-                            <div className="mt-2 flex gap-2">
-                              <button onClick={() => saveEdit(c.id)} className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs text-white">Save</button>
-                              <button onClick={() => setEditingId(null)} className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs">Cancel</button>
-                            </div>
-                          </div>
-                        ) : (
-                          <p className="mt-1 text-sm leading-relaxed whitespace-pre-wrap">{c.content}</p>
-                        )}
-                        <div className="mt-2 flex items-center gap-3 text-xs text-[var(--muted)]">
-                          <button
-                            onClick={() => handleVote("comment", c.id, 1)}
-                            disabled={voting}
-                            className="inline-flex items-center gap-1 hover:text-emerald-500 disabled:opacity-50"
-                          >
-                            ▲ {c.likes_count || 0}
-                          </button>
-                          <button
-                            onClick={() => handleVote("comment", c.id, -1)}
-                            disabled={voting}
-                            className="inline-flex items-center gap-1 hover:text-red-500 disabled:opacity-50"
-                          >
-                            ▼ {c.dislikes_count || 0}
-                          </button>
-                          {session && (
-                            <button
-                              onClick={() => setReplyTo(replyTo === c.id ? null : c.id)}
-                              className="hover:text-[var(--foreground)]"
-                            >
-                              Reply
-                            </button>
-                          )}
-                          {session?.user?.name === c.author_name && editingId !== c.id && (
-                            <>
-                              <button onClick={() => startEdit(c)} className="hover:text-[var(--foreground)]">Edit</button>
-                              <button onClick={() => deleteComment(c.id)} className="hover:text-red-500">Delete</button>
-                            </>
-                          )}
-                        </div>
-
-                        {/* Reply form */}
-                        {replyTo === c.id && (
-                          <div className="mt-3 flex gap-2">
-                            <textarea
-                              value={replyText}
-                              onChange={(e) => setReplyText(e.target.value)}
-                              rows={2}
-                              placeholder="Write a reply..."
-                              className="flex-1 resize-none rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)]"
-                            />
-                            <button
-                              onClick={() => submitComment(c.id, replyText)}
-                              disabled={submitting || !replyText.trim()}
-                              className="self-end rounded-lg bg-[var(--accent)] px-3 py-2 text-sm text-white disabled:opacity-50"
-                            >
-                              Reply
-                            </button>
-                          </div>
-                        )}
-
-                        {/* Nested replies */}
-                        {getReplies(c.id).map((r) => (
-                          <div key={r.id} className="mt-4 ml-2 flex gap-3 border-l-2 border-[var(--border)] pl-4">
-                            <Avatar src={r.author_avatar} name={r.author_name} size={24} />
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-2 text-sm">
-                                <span className="font-medium">{r.author_name || "Anonymous"}</span>
-                                <span className="text-xs text-[var(--muted)]">{timeAgo(r.created_at)}</span>
-                              </div>
-                              {editingId === r.id ? (
-                                <div className="mt-2">
-                                  <textarea value={editText} onChange={(e) => setEditText(e.target.value)} rows={2}
-                                    className="w-full resize-none rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)]" />
-                                  <div className="mt-2 flex gap-2">
-                                    <button onClick={() => saveEdit(r.id)} className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs text-white">Save</button>
-                                    <button onClick={() => setEditingId(null)} className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs">Cancel</button>
-                                  </div>
-                                </div>
-                              ) : (
-                                <p className="mt-1 text-sm leading-relaxed whitespace-pre-wrap">{r.content}</p>
-                              )}
-                              <div className="mt-1.5 flex items-center gap-3 text-xs text-[var(--muted)]">
-                                <button onClick={() => handleVote("comment", r.id, 1)} disabled={voting}
-                                  className="inline-flex items-center gap-1 hover:text-emerald-500 disabled:opacity-50">
-                                  ▲ {r.likes_count || 0}
-                                </button>
-                                <button onClick={() => handleVote("comment", r.id, -1)} disabled={voting}
-                                  className="inline-flex items-center gap-1 hover:text-red-500 disabled:opacity-50">
-                                  ▼ {r.dislikes_count || 0}
-                                </button>
-                                {session?.user?.name === r.author_name && editingId !== r.id && (
-                                  <>
-                                    <button onClick={() => startEdit(r)} className="hover:text-[var(--foreground)]">Edit</button>
-                                    <button onClick={() => deleteComment(r.id)} className="hover:text-red-500">Delete</button>
-                                  </>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
+                  <CommentNode
+                    key={c.id}
+                    comment={c}
+                    depth={0}
+                    allComments={comments}
+                    myVotes={myVotes}
+                    session={session}
+                    voting={voting}
+                    editingId={editingId}
+                    editText={editText}
+                    replyTo={replyTo}
+                    replyText={replyText}
+                    submitting={submitting}
+                    onVote={handleVote}
+                    onStartEdit={startEdit}
+                    onSaveEdit={saveEdit}
+                    onCancelEdit={() => setEditingId(null)}
+                    onDelete={deleteComment}
+                    onReplyToggle={(id) => setReplyTo(replyTo === id ? null : id)}
+                    onReplyText={setReplyText}
+                    onSubmitReply={(parentId) => submitComment(parentId, replyText)}
+                    setEditText={setEditText}
+                  />
                 ))}
               </div>
             </section>
