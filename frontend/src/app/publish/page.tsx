@@ -23,15 +23,21 @@ export default function PublishPage() {
     significance: "",
     how_to_use: "",
     download_url: "",
+    icon_url: "",
     publisher: "",
+    publisher_avatar: "",
   });
 
   useEffect(() => {
     if (status === "unauthenticated") {
       router.push("/login");
     }
-    if (session?.user?.name) {
-      setForm((prev) => ({ ...prev, publisher: session.user?.name || "" }));
+    if (session?.user) {
+      setForm((prev) => ({
+        ...prev,
+        publisher: session.user?.name || prev.publisher,
+        publisher_avatar: session.user?.image || prev.publisher_avatar,
+      }));
     }
   }, [status, session, router]);
 
@@ -92,17 +98,16 @@ export default function PublishPage() {
           >
             ← Back
           </Link>
-          <h1 className="text-3xl font-bold tracking-tight">Publish an App</h1>
-          <p className="mt-2 text-[var(--muted)]">
-            Keep it simple. Focus on the problem your software solves and how
-            people can use it.
+          <h1 className="text-3xl font-bold tracking-tight">Publish an app</h1>
+          <p className="mt-2 text-sm text-[var(--muted)]">
+            Help others discover your open-source project with a clear human-friendly description.
           </p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-6">
+        <form onSubmit={handleSubmit} className="space-y-5">
           <div>
             <label className="mb-1.5 block text-sm font-medium">
-              App Name <span className="text-red-500">*</span>
+              App name <span className="text-red-500">*</span>
             </label>
             <input
               name="name"
@@ -110,13 +115,30 @@ export default function PublishPage() {
               value={form.name}
               onChange={handleChange}
               className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm outline-none transition focus:border-[var(--accent)]"
-              placeholder="e.g. Simple Inventory"
+              placeholder="e.g. Hour Tracker"
             />
           </div>
 
           <div>
             <label className="mb-1.5 block text-sm font-medium">
-              What problem does it solve? <span className="text-red-500">*</span>
+              Icon URL
+            </label>
+            <input
+              name="icon_url"
+              type="url"
+              value={form.icon_url}
+              onChange={handleChange}
+              className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm outline-none transition focus:border-[var(--accent)]"
+              placeholder="https://... (optional – square image works best)"
+            />
+            <p className="mt-1 text-xs text-[var(--muted)]">
+              Leave empty to use a letter avatar. Prefer 128×128 or larger PNG/JPG/SVG.
+            </p>
+          </div>
+
+          <div>
+            <label className="mb-1.5 block text-sm font-medium">
+              Problem it solves <span className="text-red-500">*</span>
             </label>
             <textarea
               name="problem"
@@ -125,13 +147,13 @@ export default function PublishPage() {
               value={form.problem}
               onChange={handleChange}
               className="w-full resize-none rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm outline-none transition focus:border-[var(--accent)]"
-              placeholder="Describe the real problem this app fixes..."
+              placeholder="What problem does this app solve in simple words?"
             />
           </div>
 
           <div>
             <label className="mb-1.5 block text-sm font-medium">
-              Why does it matter?
+              Why it matters
             </label>
             <textarea
               name="significance"
@@ -183,6 +205,9 @@ export default function PublishPage() {
               placeholder="Optional"
             />
           </div>
+
+          {/* Hidden field – auto-filled from session */}
+          <input type="hidden" name="publisher_avatar" value={form.publisher_avatar} />
 
           {error && (
             <p className="rounded-lg bg-red-500/10 px-4 py-3 text-sm text-red-500">

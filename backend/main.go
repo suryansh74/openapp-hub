@@ -15,14 +15,16 @@ import (
 )
 
 type App struct {
-	ID           string    `json:"id" gorm:"primaryKey"`
-	Name         string    `json:"name" gorm:"not null"`
-	Problem      string    `json:"problem" gorm:"not null"`
-	Significance string    `json:"significance"`
-	HowToUse     string    `json:"how_to_use"`
-	DownloadURL  string    `json:"download_url"`
-	Publisher    string    `json:"publisher"`
-	CreatedAt    time.Time `json:"created_at"`
+	ID              string    `json:"id" gorm:"primaryKey"`
+	Name            string    `json:"name" gorm:"not null"`
+	Problem         string    `json:"problem" gorm:"not null"`
+	Significance    string    `json:"significance"`
+	HowToUse        string    `json:"how_to_use"`
+	DownloadURL     string    `json:"download_url"`
+	IconURL         string    `json:"icon_url"`
+	Publisher       string    `json:"publisher"`
+	PublisherAvatar string    `json:"publisher_avatar"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 // BacklogItem is a flexible store for future features / reserved work.
@@ -102,12 +104,14 @@ func createApp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var input struct {
-		Name         string `json:"name"`
-		Problem      string `json:"problem"`
-		Significance string `json:"significance"`
-		HowToUse     string `json:"how_to_use"`
-		DownloadURL  string `json:"download_url"`
-		Publisher    string `json:"publisher"`
+		Name            string `json:"name"`
+		Problem         string `json:"problem"`
+		Significance    string `json:"significance"`
+		HowToUse        string `json:"how_to_use"`
+		DownloadURL     string `json:"download_url"`
+		IconURL         string `json:"icon_url"`
+		Publisher       string `json:"publisher"`
+		PublisherAvatar string `json:"publisher_avatar"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
@@ -121,14 +125,16 @@ func createApp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	app := App{
-		ID:           uuid.New().String(),
-		Name:         input.Name,
-		Problem:      input.Problem,
-		Significance: input.Significance,
-		HowToUse:     input.HowToUse,
-		DownloadURL:  input.DownloadURL,
-		Publisher:    input.Publisher,
-		CreatedAt:    time.Now().UTC(),
+		ID:              uuid.New().String(),
+		Name:            input.Name,
+		Problem:         input.Problem,
+		Significance:    input.Significance,
+		HowToUse:        input.HowToUse,
+		DownloadURL:     input.DownloadURL,
+		IconURL:         input.IconURL,
+		Publisher:       input.Publisher,
+		PublisherAvatar: input.PublisherAvatar,
+		CreatedAt:       time.Now().UTC(),
 	}
 
 	if err := db.Create(&app).Error; err != nil {

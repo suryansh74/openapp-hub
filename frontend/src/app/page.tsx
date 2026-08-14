@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 
@@ -12,11 +13,56 @@ type App = {
   significance: string;
   how_to_use: string;
   download_url: string;
+  icon_url: string;
   publisher: string;
+  publisher_avatar: string;
   created_at: string;
 };
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+
+function AppIcon({ src, name }: { src?: string; name: string }) {
+  if (src) {
+    return (
+      <Image
+        src={src}
+        alt={`${name} icon`}
+        width={40}
+        height={40}
+        className="h-10 w-10 rounded-xl object-cover"
+        unoptimized
+      />
+    );
+  }
+  // Fallback: first letter in a colored box
+  const letter = (name || "A").charAt(0).toUpperCase();
+  return (
+    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--accent)]/15 text-sm font-bold text-[var(--accent)]">
+      {letter}
+    </div>
+  );
+}
+
+function PublisherAvatar({ src, name }: { src?: string; name?: string }) {
+  if (src) {
+    return (
+      <Image
+        src={src}
+        alt={name || "Publisher"}
+        width={20}
+        height={20}
+        className="h-5 w-5 rounded-full object-cover"
+        unoptimized
+      />
+    );
+  }
+  const letter = (name || "A").charAt(0).toUpperCase();
+  return (
+    <div className="flex h-5 w-5 items-center justify-center rounded-full bg-[var(--border)] text-[10px] font-medium text-[var(--muted)]">
+      {letter}
+    </div>
+  );
+}
 
 export default function Home() {
   const [apps, setApps] = useState<App[]>([]);
@@ -69,14 +115,22 @@ export default function Home() {
               <Link
                 key={app.id}
                 href={`/app/${app.id}`}
-                className="group rounded-2xl border border-[var(--border)] bg-[var(--card)] p-6 transition hover:border-zinc-500/40 hover:bg-[var(--card-hover)]"
+                className="group rounded-2xl border border-[var(--border)] bg-[var(--card)] p-5 transition hover:border-zinc-500/40 hover:bg-[var(--card-hover)]"
               >
-                <h2 className="text-lg font-semibold">{app.name}</h2>
-                <p className="mt-2 line-clamp-2 text-sm leading-relaxed text-[var(--muted)]">
-                  {app.problem}
-                </p>
+                <div className="flex items-start gap-3.5">
+                  <AppIcon src={app.icon_url} name={app.name} />
+                  <div className="min-w-0 flex-1">
+                    <h2 className="text-lg font-semibold leading-tight">{app.name}</h2>
+                    <p className="mt-1.5 line-clamp-2 text-sm leading-relaxed text-[var(--muted)]">
+                      {app.problem}
+                    </p>
+                  </div>
+                </div>
                 <div className="mt-4 flex items-center justify-between text-xs text-[var(--muted)]">
-                  <span>by {app.publisher || "Anonymous"}</span>
+                  <div className="flex items-center gap-2">
+                    <PublisherAvatar src={app.publisher_avatar} name={app.publisher} />
+                    <span>by {app.publisher || "Anonymous"}</span>
+                  </div>
                   <span className="opacity-0 transition group-hover:opacity-100">
                     View →
                   </span>

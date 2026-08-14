@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 
@@ -13,11 +14,59 @@ type App = {
   significance: string;
   how_to_use: string;
   download_url: string;
+  icon_url: string;
   publisher: string;
+  publisher_avatar: string;
   created_at: string;
 };
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+
+function AppIcon({ src, name, size = 56 }: { src?: string; name: string; size?: number }) {
+  if (src) {
+    return (
+      <Image
+        src={src}
+        alt={`${name} icon`}
+        width={size}
+        height={size}
+        className="rounded-2xl object-cover"
+        style={{ width: size, height: size }}
+        unoptimized
+      />
+    );
+  }
+  const letter = (name || "A").charAt(0).toUpperCase();
+  return (
+    <div
+      className="flex items-center justify-center rounded-2xl bg-[var(--accent)]/15 text-xl font-bold text-[var(--accent)]"
+      style={{ width: size, height: size }}
+    >
+      {letter}
+    </div>
+  );
+}
+
+function PublisherAvatar({ src, name }: { src?: string; name?: string }) {
+  if (src) {
+    return (
+      <Image
+        src={src}
+        alt={name || "Publisher"}
+        width={24}
+        height={24}
+        className="h-6 w-6 rounded-full object-cover"
+        unoptimized
+      />
+    );
+  }
+  const letter = (name || "A").charAt(0).toUpperCase();
+  return (
+    <div className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--border)] text-xs font-medium text-[var(--muted)]">
+      {letter}
+    </div>
+  );
+}
 
 export default function AppDetailPage() {
   const params = useParams();
@@ -90,12 +139,19 @@ export default function AppDetailPage() {
           >
             ← All apps
           </Link>
-          <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
-            {app.name}
-          </h1>
-          <p className="mt-2 text-sm text-[var(--muted)]">
-            Published by {app.publisher || "Anonymous"}
-          </p>
+
+          <div className="flex items-start gap-4">
+            <AppIcon src={app.icon_url} name={app.name} size={64} />
+            <div className="min-w-0 flex-1">
+              <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
+                {app.name}
+              </h1>
+              <div className="mt-2 flex items-center gap-2 text-sm text-[var(--muted)]">
+                <PublisherAvatar src={app.publisher_avatar} name={app.publisher} />
+                <span>Published by {app.publisher || "Anonymous"}</span>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div className="space-y-4">
