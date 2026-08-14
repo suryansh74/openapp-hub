@@ -1,14 +1,17 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
+import Image from "next/image";
 import Header from "@/components/Header";
 import { useToast } from "@/components/Toast";
 import Footer from "@/components/Footer";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+const MAX_SHOTS = 6;
+const MAX_SIZE = 1 * 1024 * 1024; // 1MB
 
 type App = {
   id: string;
@@ -25,6 +28,21 @@ type App = {
   user_id: string;
 };
 
+async function uploadFile(file: File): Promise<string> {
+  if (file.size > MAX_SIZE) {
+    throw new Error(`"${file.name}" is larger than 1MB`);
+  }
+  const fd = new FormData();
+  fd.append("file", file);
+  const res = await fetch(`${API_URL}/api/upload`, { method: "POST", body: fd });
+  if (!res.ok) {
+    const t = await res.text();
+    throw new Error(t || "Upload failed");
+  }
+  const data = await res.json();
+  return data.url as string;
+}
+
 export default function EditAppPage() {
   const params = useParams();
   const id = params.id as string;
@@ -34,6 +52,7 @@ export default function EditAppPage() {
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
   const [form, setForm] = useState({
     name: "",
@@ -43,9 +62,12 @@ export default function EditAppPage() {
     download_url: "",
     icon_url: "",
     youtube_url: "",
-    screenshots: "" as string, // comma or newline separated URLs for simplicity
     publisher: "",
   });
+  const [shots, setShots] = useState<string[]>([]);
+
+  const iconInputRef = useRef<HTMLInputElement>(null);
+  const shotsInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (status === "unauthenticated") {
@@ -60,10 +82,10 @@ export default function EditAppPage() {
         return res.json();
       })
       .then((data: App) => {
-        let shots: string[] = [];
+        let list: string[] = [];
         try {
-          if (Array.isArray(data.screenshots)) shots = data.screenshots;
-          else if (typeof data.screenshots === "string") shots = JSON.parse(data.screenshots || "[]");
+          if (Array.isArray(data.screenshots)) list = data.screenshots;
+          else if (typeof data.screenshots === "string") list = JSON.parse(data.screenshots || "[]");
         } catch {}
         setForm({
           name: data.name || "",
@@ -73,9 +95,9 @@ export default function EditAppPage() {
           download_url: data.download_url || "",
           icon_url: data.icon_url || "",
           youtube_url: data.youtube_url || "",
-          screenshots: shots.join("\n"),
           publisher: data.publisher || "",
         });
+        setShots(list);
         setLoading(false);
       })
       .catch((err) => {
@@ -90,27 +112,61 @@ export default function EditAppPage() {
     setForm({ ...form, [e.target.name]: e.target.value });
   };
 
+  const handleIconUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const url = await uploadFile(file);
+      setForm((prev) => ({ ...prev, icon_url: url }));
+      toast("Icon uploaded", "success");
+    } catch (err: any) {
+      toast(err.message || "Upload failed", "error");
+    } finally {
+      setUploading(false);
+      if (iconInputRef.current) iconInputRef.current.value = "";
+    }
+  };
+
+  const handleShotsUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    const remaining = MAX_SHOTS - shots.length;
+    if (remaining <= 0) {
+      toast(`Maximum ${MAX_SHOTS} screenshots allowed`, "error");
+      return;
+    }
+    const toUpload = files.slice(0, remaining);
+    setUploading(true);
+    try {
+      const urls: string[] = [];
+      for (const f of toUpload) {
+        const url = await uploadFile(f);
+        urls.push(url);
+      }
+      setShots((prev) => [...prev, ...urls]);
+      toast(`${urls.length} image(s) uploaded`, "success");
+    } catch (err: any) {
+      toast(err.message || "Upload failed", "error");
+    } finally {
+      setUploading(false);
+      if (shotsInputRef.current) shotsInputRef.current.value = "";
+    }
+  };
+
+  const removeShot = (idx: number) => {
+    setShots((prev) => prev.filter((_, i) => i !== idx));
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
     setError("");
 
     try {
-      // Keep publisher avatar in sync with current session image
-      const shots = form.screenshots
-        .split(/[\n,]+/)
-        .map((s) => s.trim())
-        .filter(Boolean);
       const payload = {
-        name: form.name,
-        problem: form.problem,
-        significance: form.significance,
-        how_to_use: form.how_to_use,
-        download_url: form.download_url,
-        icon_url: form.icon_url,
-        youtube_url: form.youtube_url,
+        ...form,
         screenshots: shots,
-        publisher: form.publisher,
         publisher_avatar: session?.user?.image || "",
       };
 
@@ -175,7 +231,7 @@ export default function EditAppPage() {
           </Link>
           <h1 className="text-3xl font-bold tracking-tight">Edit app</h1>
           <p className="mt-2 text-sm text-[var(--muted)]">
-            Update details, icon, or description.
+            Update details, upload icon & screenshots (max 1MB each).
           </p>
         </div>
 
@@ -193,31 +249,51 @@ export default function EditAppPage() {
             />
           </div>
 
+          {/* Icon upload */}
           <div>
-            <label className="mb-1.5 block text-sm font-medium">
-              Icon URL
-            </label>
-            <input
-              name="icon_url"
-              type="url"
-              value={form.icon_url}
-              onChange={handleChange}
-              className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm outline-none transition focus:border-[var(--accent)]"
-              placeholder="https://... (square image recommended)"
-            />
-            {form.icon_url && (
-              <div className="mt-3 flex items-center gap-3">
-                <img
+            <label className="mb-1.5 block text-sm font-medium">App icon</label>
+            <div className="flex items-center gap-4">
+              {form.icon_url ? (
+                <Image
                   src={form.icon_url}
-                  alt="Preview"
-                  className="h-12 w-12 rounded-xl object-cover border border-[var(--border)]"
-                  onError={(e) => {
-                    (e.target as HTMLImageElement).style.display = "none";
-                  }}
+                  alt="Icon"
+                  width={56}
+                  height={56}
+                  className="h-14 w-14 rounded-xl object-cover border border-[var(--border)]"
+                  unoptimized
                 />
-                <span className="text-xs text-[var(--muted)]">Preview</span>
+              ) : (
+                <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-[var(--accent)]/15 text-lg font-bold text-[var(--accent)]">
+                  {(form.name || "A").charAt(0).toUpperCase()}
+                </div>
+              )}
+              <div>
+                <input
+                  ref={iconInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleIconUpload}
+                  className="hidden"
+                  id="icon-upload"
+                />
+                <label
+                  htmlFor="icon-upload"
+                  className="cursor-pointer rounded-lg border border-[var(--border)] px-3 py-2 text-sm transition hover:bg-[var(--card)]"
+                >
+                  {uploading ? "Uploading..." : "Upload icon"}
+                </label>
+                {form.icon_url && (
+                  <button
+                    type="button"
+                    onClick={() => setForm((p) => ({ ...p, icon_url: "" }))}
+                    className="ml-2 text-xs text-red-500 hover:underline"
+                  >
+                    Remove
+                  </button>
+                )}
+                <p className="mt-1 text-xs text-[var(--muted)]">Max 1MB · PNG/JPG/WebP</p>
               </div>
-            )}
+            </div>
           </div>
 
           <div>
@@ -235,9 +311,7 @@ export default function EditAppPage() {
           </div>
 
           <div>
-            <label className="mb-1.5 block text-sm font-medium">
-              Why it matters
-            </label>
+            <label className="mb-1.5 block text-sm font-medium">Why it matters</label>
             <textarea
               name="significance"
               rows={3}
@@ -248,9 +322,7 @@ export default function EditAppPage() {
           </div>
 
           <div>
-            <label className="mb-1.5 block text-sm font-medium">
-              How to use it
-            </label>
+            <label className="mb-1.5 block text-sm font-medium">How to use it</label>
             <textarea
               name="how_to_use"
               rows={4}
@@ -261,9 +333,7 @@ export default function EditAppPage() {
           </div>
 
           <div>
-            <label className="mb-1.5 block text-sm font-medium">
-              Download / Link
-            </label>
+            <label className="mb-1.5 block text-sm font-medium">Download / Link</label>
             <input
               name="download_url"
               type="url"
@@ -274,9 +344,7 @@ export default function EditAppPage() {
           </div>
 
           <div>
-            <label className="mb-1.5 block text-sm font-medium">
-              YouTube video URL
-            </label>
+            <label className="mb-1.5 block text-sm font-medium">YouTube video URL</label>
             <input
               name="youtube_url"
               type="url"
@@ -287,27 +355,49 @@ export default function EditAppPage() {
             />
           </div>
 
+          {/* Screenshots upload */}
           <div>
             <label className="mb-1.5 block text-sm font-medium">
-              Screenshots (one URL per line)
+              Screenshots ({shots.length}/{MAX_SHOTS})
             </label>
-            <textarea
-              name="screenshots"
-              rows={3}
-              value={form.screenshots}
-              onChange={handleChange}
-              className="w-full resize-none rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm outline-none transition focus:border-[var(--accent)]"
-              placeholder={"https://res.cloudinary.com/.../shot1.png\nhttps://..."}
+            <div className="mb-3 grid grid-cols-3 gap-2 sm:grid-cols-4">
+              {shots.map((url, i) => (
+                <div key={i} className="group relative aspect-video overflow-hidden rounded-lg border border-[var(--border)]">
+                  <Image src={url} alt={`Shot ${i + 1}`} fill className="object-cover" unoptimized />
+                  <button
+                    type="button"
+                    onClick={() => removeShot(i)}
+                    className="absolute right-1 top-1 rounded bg-black/70 px-1.5 py-0.5 text-xs text-white opacity-0 transition group-hover:opacity-100"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+              {shots.length < MAX_SHOTS && (
+                <label
+                  htmlFor="shots-upload"
+                  className="flex aspect-video cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-[var(--border)] text-xs text-[var(--muted)] transition hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                >
+                  {uploading ? "..." : "+ Add"}
+                </label>
+              )}
+            </div>
+            <input
+              ref={shotsInputRef}
+              id="shots-upload"
+              type="file"
+              accept="image/*"
+              multiple
+              onChange={handleShotsUpload}
+              className="hidden"
             />
-            <p className="mt-1 text-xs text-[var(--muted)]">
-              Paste image URLs (Cloudinary or any public URL). Max 1MB per image when uploading.
+            <p className="text-xs text-[var(--muted)]">
+              Upload up to {MAX_SHOTS} images · Max 1MB each · Select multiple at once
             </p>
           </div>
 
           <div>
-            <label className="mb-1.5 block text-sm font-medium">
-              Publisher name
-            </label>
+            <label className="mb-1.5 block text-sm font-medium">Publisher name</label>
             <input
               name="publisher"
               value={form.publisher}
@@ -317,15 +407,13 @@ export default function EditAppPage() {
           </div>
 
           {error && (
-            <p className="rounded-lg bg-red-500/10 px-4 py-3 text-sm text-red-500">
-              {error}
-            </p>
+            <p className="rounded-lg bg-red-500/10 px-4 py-3 text-sm text-red-500">{error}</p>
           )}
 
           <div className="flex gap-3">
             <button
               type="submit"
-              disabled={saving}
+              disabled={saving || uploading}
               className="flex-1 rounded-xl bg-[var(--accent)] px-4 py-3.5 font-medium text-white transition hover:bg-[var(--accent-hover)] disabled:opacity-50"
             >
               {saving ? "Saving..." : "Save changes"}

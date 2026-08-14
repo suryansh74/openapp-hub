@@ -134,6 +134,9 @@ export default function AppDetailPage() {
   const [replyText, setReplyText] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [lightbox, setLightbox] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editText, setEditText] = useState("");
+  const [voting, setVoting] = useState(false);
 
   const loadComments = useCallback(() => {
     if (!id) return;
@@ -166,6 +169,8 @@ export default function AppDetailPage() {
       toast("Please sign in to vote", "error");
       return;
     }
+    if (voting) return;
+    setVoting(true);
     try {
       const res = await fetch(`${API_URL}/api/vote`, {
         method: "POST",
@@ -177,14 +182,54 @@ export default function AppDetailPage() {
           value,
         }),
       });
+      if (!res.ok) throw new Error("vote failed");
       const data = await res.json();
       if (targetType === "app" && app) {
-        setApp({ ...app, likes_count: data.likes_count, dislikes_count: data.dislikes_count });
+        setApp({ ...app, likes_count: data.likes_count ?? 0, dislikes_count: data.dislikes_count ?? 0 });
       } else {
         loadComments();
       }
     } catch {
       toast("Failed to vote", "error");
+    } finally {
+      setVoting(false);
+    }
+  };
+
+  const startEdit = (c: Comment) => {
+    setEditingId(c.id);
+    setEditText(c.content);
+  };
+
+  const saveEdit = async (commentId: string) => {
+    if (!session?.user?.email || !editText.trim()) return;
+    try {
+      const res = await fetch(`${API_URL}/api/comments/${commentId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: editText.trim(), user_email: session.user.email }),
+      });
+      if (!res.ok) throw new Error("Failed");
+      setEditingId(null);
+      loadComments();
+      toast("Comment updated", "success");
+    } catch {
+      toast("Failed to update comment", "error");
+    }
+  };
+
+  const deleteComment = async (commentId: string) => {
+    if (!session?.user?.email) return;
+    if (!confirm("Delete this comment?")) return;
+    try {
+      const res = await fetch(`${API_URL}/api/comments/${commentId}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error("Failed");
+      loadComments();
+      toast("Comment deleted", "success");
+    } catch {
+      toast("Failed to delete comment", "error");
     }
   };
 
@@ -282,7 +327,8 @@ export default function AppDetailPage() {
               {/* Like / Dislike */}
               <button
                 onClick={() => handleVote("app", app.id, 1)}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 text-sm transition hover:border-emerald-500/40 hover:bg-emerald-500/10"
+                disabled={voting}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 text-sm transition hover:border-emerald-500/40 hover:bg-emerald-500/10 disabled:opacity-50"
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3H14zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
@@ -291,7 +337,8 @@ export default function AppDetailPage() {
               </button>
               <button
                 onClick={() => handleVote("app", app.id, -1)}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 text-sm transition hover:border-red-500/40 hover:bg-red-500/10"
+                disabled={voting}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--card)] px-3 py-1.5 text-sm transition hover:border-red-500/40 hover:bg-red-500/10 disabled:opacity-50"
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3H10zM17 2h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17" />
@@ -442,17 +489,34 @@ export default function AppDetailPage() {
                           <span className="font-medium">{c.author_name || "Anonymous"}</span>
                           <span className="text-xs text-[var(--muted)]">{timeAgo(c.created_at)}</span>
                         </div>
-                        <p className="mt-1 text-sm leading-relaxed whitespace-pre-wrap">{c.content}</p>
+                        {editingId === c.id ? (
+                          <div className="mt-2">
+                            <textarea
+                              value={editText}
+                              onChange={(e) => setEditText(e.target.value)}
+                              rows={3}
+                              className="w-full resize-none rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)]"
+                            />
+                            <div className="mt-2 flex gap-2">
+                              <button onClick={() => saveEdit(c.id)} className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs text-white">Save</button>
+                              <button onClick={() => setEditingId(null)} className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs">Cancel</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <p className="mt-1 text-sm leading-relaxed whitespace-pre-wrap">{c.content}</p>
+                        )}
                         <div className="mt-2 flex items-center gap-3 text-xs text-[var(--muted)]">
                           <button
                             onClick={() => handleVote("comment", c.id, 1)}
-                            className="inline-flex items-center gap-1 hover:text-emerald-500"
+                            disabled={voting}
+                            className="inline-flex items-center gap-1 hover:text-emerald-500 disabled:opacity-50"
                           >
                             ▲ {c.likes_count || 0}
                           </button>
                           <button
                             onClick={() => handleVote("comment", c.id, -1)}
-                            className="inline-flex items-center gap-1 hover:text-red-500"
+                            disabled={voting}
+                            className="inline-flex items-center gap-1 hover:text-red-500 disabled:opacity-50"
                           >
                             ▼ {c.dislikes_count || 0}
                           </button>
@@ -463,6 +527,12 @@ export default function AppDetailPage() {
                             >
                               Reply
                             </button>
+                          )}
+                          {session?.user?.name === c.author_name && editingId !== c.id && (
+                            <>
+                              <button onClick={() => startEdit(c)} className="hover:text-[var(--foreground)]">Edit</button>
+                              <button onClick={() => deleteComment(c.id)} className="hover:text-red-500">Delete</button>
+                            </>
                           )}
                         </div>
 
@@ -495,20 +565,33 @@ export default function AppDetailPage() {
                                 <span className="font-medium">{r.author_name || "Anonymous"}</span>
                                 <span className="text-xs text-[var(--muted)]">{timeAgo(r.created_at)}</span>
                               </div>
-                              <p className="mt-1 text-sm leading-relaxed whitespace-pre-wrap">{r.content}</p>
+                              {editingId === r.id ? (
+                                <div className="mt-2">
+                                  <textarea value={editText} onChange={(e) => setEditText(e.target.value)} rows={2}
+                                    className="w-full resize-none rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)]" />
+                                  <div className="mt-2 flex gap-2">
+                                    <button onClick={() => saveEdit(r.id)} className="rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs text-white">Save</button>
+                                    <button onClick={() => setEditingId(null)} className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs">Cancel</button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <p className="mt-1 text-sm leading-relaxed whitespace-pre-wrap">{r.content}</p>
+                              )}
                               <div className="mt-1.5 flex items-center gap-3 text-xs text-[var(--muted)]">
-                                <button
-                                  onClick={() => handleVote("comment", r.id, 1)}
-                                  className="inline-flex items-center gap-1 hover:text-emerald-500"
-                                >
+                                <button onClick={() => handleVote("comment", r.id, 1)} disabled={voting}
+                                  className="inline-flex items-center gap-1 hover:text-emerald-500 disabled:opacity-50">
                                   ▲ {r.likes_count || 0}
                                 </button>
-                                <button
-                                  onClick={() => handleVote("comment", r.id, -1)}
-                                  className="inline-flex items-center gap-1 hover:text-red-500"
-                                >
+                                <button onClick={() => handleVote("comment", r.id, -1)} disabled={voting}
+                                  className="inline-flex items-center gap-1 hover:text-red-500 disabled:opacity-50">
                                   ▼ {r.dislikes_count || 0}
                                 </button>
+                                {session?.user?.name === r.author_name && editingId !== r.id && (
+                                  <>
+                                    <button onClick={() => startEdit(r)} className="hover:text-[var(--foreground)]">Edit</button>
+                                    <button onClick={() => deleteComment(r.id)} className="hover:text-red-500">Delete</button>
+                                  </>
+                                )}
                               </div>
                             </div>
                           </div>

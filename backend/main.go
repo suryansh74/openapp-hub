@@ -67,11 +67,12 @@ type Comment struct {
 
 // Vote tracks user likes/dislikes on apps or comments
 // TargetType: "app" | "comment"
+// Unique per (user_email, target_type, target_id)
 type Vote struct {
 	ID         string    `json:"id" gorm:"primaryKey"`
-	UserEmail  string    `json:"user_email" gorm:"index;not null"`
-	TargetType string    `json:"target_type" gorm:"index;not null"`
-	TargetID   string    `json:"target_id" gorm:"index;not null"`
+	UserEmail  string    `json:"user_email" gorm:"uniqueIndex:idx_vote_user_target;not null"`
+	TargetType string    `json:"target_type" gorm:"uniqueIndex:idx_vote_user_target;not null"`
+	TargetID   string    `json:"target_id" gorm:"uniqueIndex:idx_vote_user_target;not null"`
 	Value      int       `json:"value"` // 1 = like, -1 = dislike
 	CreatedAt  time.Time `json:"created_at"`
 }
@@ -316,11 +317,11 @@ func voteHandler(w http.ResponseWriter, r *http.Request) {
 		applyVoteDelta(input.TargetType, input.TargetID, input.Value, 0)
 	} else if err == nil {
 		if existing.Value == input.Value {
-			// toggle off
+			// toggle off — remove the existing vote
 			db.Delete(&existing)
-			applyVoteDelta(input.TargetType, input.TargetID, -input.Value, 0)
+			applyVoteDelta(input.TargetType, input.TargetID, 0, existing.Value)
 		} else {
-			// switch
+			// switch like <-> dislike
 			old := existing.Value
 			db.Model(&existing).Update("value", input.Value)
 			applyVoteDelta(input.TargetType, input.TargetID, input.Value, old)
@@ -444,6 +445,87 @@ func createComment(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(c)
+}
+
+
+func updateComment(w http.ResponseWriter, r *http.Request) {
+	enableCORS(w)
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if r.Method != http.MethodPatch && r.Method != http.MethodPut {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	id := strings.TrimPrefix(r.URL.Path, "/api/comments/")
+	if id == "" {
+		http.Error(w, "missing id", http.StatusBadRequest)
+		return
+	}
+	var c Comment
+	if err := db.First(&c, "id = ?", id).Error; err != nil {
+		http.Error(w, "comment not found", http.StatusNotFound)
+		return
+	}
+	var input struct {
+		Content   string `json:"content"`
+		UserEmail string `json:"user_email"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(input.Content) == "" {
+		http.Error(w, "content required", http.StatusBadRequest)
+		return
+	}
+	// Optional ownership check via email if provided
+	if input.UserEmail != "" {
+		var user User
+		if err := db.Where("email = ?", input.UserEmail).First(&user).Error; err == nil {
+			if c.UserID != "" && c.UserID != user.ID {
+				http.Error(w, "not authorized", http.StatusForbidden)
+				return
+			}
+		}
+	}
+	db.Model(&c).Updates(map[string]interface{}{
+		"content":    strings.TrimSpace(input.Content),
+		"updated_at": time.Now().UTC(),
+	})
+	db.First(&c, "id = ?", id)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(c)
+}
+
+func deleteComment(w http.ResponseWriter, r *http.Request) {
+	enableCORS(w)
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if r.Method != http.MethodDelete {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	id := strings.TrimPrefix(r.URL.Path, "/api/comments/")
+	if id == "" {
+		http.Error(w, "missing id", http.StatusBadRequest)
+		return
+	}
+	var c Comment
+	if err := db.First(&c, "id = ?", id).Error; err != nil {
+		http.Error(w, "comment not found", http.StatusNotFound)
+		return
+	}
+	// Also delete nested replies
+	db.Where("parent_id = ?", id).Delete(&Comment{})
+	db.Delete(&c)
+	// Clean up votes on this comment
+	db.Where("target_type = ? AND target_id = ?", "comment", id).Delete(&Vote{})
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
 }
 
 // --- Upload (Cloudinary, max 1MB) ---
@@ -627,6 +709,16 @@ func main() {
 			listComments(w, r)
 		case http.MethodPost:
 			createComment(w, r)
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	http.HandleFunc("/api/comments/", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPatch, http.MethodPut, http.MethodOptions:
+			updateComment(w, r)
+		case http.MethodDelete:
+			deleteComment(w, r)
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
