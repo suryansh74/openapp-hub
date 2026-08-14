@@ -18,6 +18,8 @@ type App = {
   how_to_use: string;
   download_url: string;
   icon_url: string;
+  youtube_url?: string;
+  screenshots?: string[] | string;
   publisher: string;
   publisher_avatar: string;
   user_id: string;
