@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
@@ -119,6 +119,154 @@ function timeAgo(dateStr: string) {
   return d.toLocaleDateString();
 }
 
+
+function ScreenshotSlider({
+  images,
+  index,
+  onClose,
+  onChange,
+}: {
+  images: string[];
+  index: number;
+  onClose: () => void;
+  onChange: (i: number) => void;
+}) {
+  const total = images.length;
+  const touchStartX = useRef<number | null>(null);
+  const touchDeltaX = useRef(0);
+
+  const goPrev = useCallback(() => {
+    onChange((index - 1 + total) % total);
+  }, [index, total, onChange]);
+
+  const goNext = useCallback(() => {
+    onChange((index + 1) % total);
+  }, [index, total, onChange]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+      if (e.key === "ArrowLeft") goPrev();
+      if (e.key === "ArrowRight") goNext();
+    };
+    window.addEventListener("keydown", onKey);
+    // lock body scroll
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [goPrev, goNext, onClose]);
+
+  const onTouchStart = (e: React.TouchEvent) => {
+    touchStartX.current = e.touches[0].clientX;
+    touchDeltaX.current = 0;
+  };
+  const onTouchMove = (e: React.TouchEvent) => {
+    if (touchStartX.current == null) return;
+    touchDeltaX.current = e.touches[0].clientX - touchStartX.current;
+  };
+  const onTouchEnd = () => {
+    if (Math.abs(touchDeltaX.current) > 50) {
+      if (touchDeltaX.current > 0) goPrev();
+      else goNext();
+    }
+    touchStartX.current = null;
+    touchDeltaX.current = 0;
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-[200] flex flex-col bg-black/90"
+      onClick={onClose}
+      onTouchStart={onTouchStart}
+      onTouchMove={onTouchMove}
+      onTouchEnd={onTouchEnd}
+    >
+      {/* Top bar: counter + close */}
+      <div
+        className="flex items-center justify-between px-4 py-3 text-white/90 sm:px-6"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <span className="text-sm font-medium tabular-nums tracking-wide">
+          {index + 1} / {total}
+        </span>
+        <button
+          onClick={onClose}
+          className="rounded-lg px-3 py-1.5 text-sm transition hover:bg-white/10"
+          aria-label="Close"
+        >
+          ✕ Close
+        </button>
+      </div>
+
+      {/* Image area */}
+      <div className="relative flex flex-1 items-center justify-center px-12 sm:px-16">
+        {/* Prev button */}
+        {total > 1 && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              goPrev();
+            }}
+            className="absolute left-2 z-10 flex h-11 w-11 items-center justify-center rounded-full bg-white/10 text-white backdrop-blur transition hover:bg-white/20 sm:left-4"
+            aria-label="Previous"
+          >
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <path d="M15 18l-6-6 6-6" />
+            </svg>
+          </button>
+        )}
+
+        <img
+          src={images[index]}
+          alt={`Screenshot ${index + 1} of ${total}`}
+          className="max-h-[calc(100vh-8rem)] max-w-full select-none rounded-lg object-contain shadow-2xl"
+          onClick={(e) => e.stopPropagation()}
+          draggable={false}
+        />
+
+        {/* Next button */}
+        {total > 1 && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              goNext();
+            }}
+            className="absolute right-2 z-10 flex h-11 w-11 items-center justify-center rounded-full bg-white/10 text-white backdrop-blur transition hover:bg-white/20 sm:right-4"
+            aria-label="Next"
+          >
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <path d="M9 18l6-6-6-6" />
+            </svg>
+          </button>
+        )}
+      </div>
+
+      {/* Dot indicators */}
+      {total > 1 && (
+        <div
+          className="flex items-center justify-center gap-1.5 pb-5 pt-2"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {images.map((_, i) => (
+            <button
+              key={i}
+              onClick={() => onChange(i)}
+              className={`h-1.5 rounded-full transition-all ${
+                i === index ? "w-5 bg-white" : "w-1.5 bg-white/40 hover:bg-white/70"
+              }`}
+              aria-label={`Go to image ${i + 1}`}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 export default function AppDetailPage() {
   const params = useParams();
   const id = params.id as string;
@@ -133,7 +281,7 @@ export default function AppDetailPage() {
   const [replyTo, setReplyTo] = useState<string | null>(null);
   const [replyText, setReplyText] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [lightbox, setLightbox] = useState<string | null>(null);
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
   const [voting, setVoting] = useState(false);
@@ -420,7 +568,7 @@ export default function AppDetailPage() {
                     {screenshots.map((src, i) => (
                       <button
                         key={i}
-                        onClick={() => setLightbox(src)}
+                        onClick={() => setLightboxIndex(i)}
                         className="group relative aspect-video overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--background)]"
                       >
                         <Image
@@ -632,18 +780,14 @@ export default function AppDetailPage() {
         </div>
       </main>
 
-      {/* Lightbox */}
-      {lightbox && (
-        <div
-          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 p-4"
-          onClick={() => setLightbox(null)}
-        >
-          <img
-            src={lightbox}
-            alt="Screenshot"
-            className="max-h-[90vh] max-w-full rounded-lg object-contain"
-          />
-        </div>
+      {/* Screenshot slider lightbox */}
+      {lightboxIndex !== null && screenshots.length > 0 && (
+        <ScreenshotSlider
+          images={screenshots}
+          index={lightboxIndex}
+          onClose={() => setLightboxIndex(null)}
+          onChange={setLightboxIndex}
+        />
       )}
 
       <Footer />
