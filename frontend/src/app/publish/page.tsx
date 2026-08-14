@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 import Link from "next/link";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
@@ -10,6 +11,7 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
 export default function PublishPage() {
   const router = useRouter();
+  const { data: session, status } = useSession();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -21,6 +23,15 @@ export default function PublishPage() {
     download_url: "",
     publisher: "",
   });
+
+  useEffect(() => {
+    if (status === "unauthenticated") {
+      router.push("/login");
+    }
+    if (session?.user?.name) {
+      setForm((prev) => ({ ...prev, publisher: session.user?.name || "" }));
+    }
+  }, [status, session, router]);
 
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
@@ -52,6 +63,18 @@ export default function PublishPage() {
       setLoading(false);
     }
   };
+
+  if (status === "loading" || status === "unauthenticated") {
+    return (
+      <>
+        <Header showPublish={false} />
+        <main className="flex flex-1 items-center justify-center">
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--border)] border-t-[var(--accent)]" />
+        </main>
+        <Footer />
+      </>
+    );
+  }
 
   return (
     <>
