@@ -31,6 +31,11 @@ async function uploadFile(file: File): Promise<string> {
 export default function PublishPage() {
   const router = useRouter();
   const { data: session, status } = useSession();
+  useEffect(() => {
+    document.title = "Publish an app · OpenApp Hub";
+    return () => { document.title = "OpenApp Hub"; };
+  }, []);
+
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);

@@ -65,6 +65,10 @@ function PublisherAvatar({ src, name }: { src?: string; name?: string }) {
 }
 
 export default function Home() {
+  useEffect(() => {
+    document.title = "OpenApp Hub";
+  }, []);
+
   const [apps, setApps] = useState<App[]>([]);
   const [loading, setLoading] = useState(true);
 

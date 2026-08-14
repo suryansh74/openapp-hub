@@ -7,6 +7,11 @@ import Image from 'next/image';
 
 export default function ProfilePage() {
   const { data: session } = useSession();
+  useEffect(() => {
+    document.title = "Profile · OpenApp Hub";
+    return () => { document.title = "OpenApp Hub"; };
+  }, []);
+
   const router = useRouter();
   const [avatar, setAvatar] = useState('');
   const [name, setName] = useState('');

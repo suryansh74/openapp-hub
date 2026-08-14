@@ -14,7 +14,10 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "OpenApp Hub",
+  title: {
+    default: "OpenApp Hub",
+    template: "%s · OpenApp Hub",
+  },
   description: "Simple human-first open-source application store",
   icons: {
     icon: "/icon.svg",

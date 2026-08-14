@@ -73,6 +73,12 @@ export default function EditAppPage() {
   const shotsInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    if (form.name) document.title = `Edit ${form.name} · OpenApp Hub`;
+    else document.title = "Edit app · OpenApp Hub";
+    return () => { document.title = "OpenApp Hub"; };
+  }, [form.name]);
+
+  useEffect(() => {
     if (status === "unauthenticated") {
       router.push("/login");
       return;

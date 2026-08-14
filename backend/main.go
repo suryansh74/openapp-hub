@@ -566,13 +566,29 @@ func deleteComment(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "comment not found", http.StatusNotFound)
 		return
 	}
-	// Also delete nested replies
-	db.Where("parent_id = ?", id).Delete(&Comment{})
-	db.Delete(&c)
-	// Clean up votes on this comment
-	db.Where("target_type = ? AND target_id = ?", "comment", id).Delete(&Vote{})
+
+	// Collect entire reply subtree (any depth), then delete all
+	toDelete := []string{id}
+	queue := []string{id}
+	for len(queue) > 0 {
+		parent := queue[0]
+		queue = queue[1:]
+		var children []Comment
+		db.Where("parent_id = ?", parent).Find(&children)
+		for _, ch := range children {
+			toDelete = append(toDelete, ch.ID)
+			queue = append(queue, ch.ID)
+		}
+	}
+
+	db.Where("id IN ?", toDelete).Delete(&Comment{})
+	db.Where("target_type = ? AND target_id IN ?", "comment", toDelete).Delete(&Vote{})
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "deleted"})
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":        "deleted",
+		"deleted_count": len(toDelete),
+	})
 }
 
 // --- Upload (Cloudinary, max 1MB) ---

@@ -469,6 +469,18 @@ export default function AppDetailPage() {
     loadComments();
   }, [id, loadComments]);
 
+  // Dynamic browser tab title
+  useEffect(() => {
+    if (app?.name) {
+      document.title = `${app.name} · OpenApp Hub`;
+    } else {
+      document.title = "OpenApp Hub";
+    }
+    return () => {
+      document.title = "OpenApp Hub";
+    };
+  }, [app?.name]);
+
   // Load this user's existing votes for app + comments
   useEffect(() => {
     if (!id || !session?.user?.email) {

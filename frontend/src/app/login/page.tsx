@@ -1,11 +1,17 @@
 "use client";
 
+import { useEffect } from "react";
 import { signIn } from "next-auth/react";
 import Link from "next/link";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 
 export default function LoginPage() {
+  useEffect(() => {
+    document.title = "Sign in · OpenApp Hub";
+    return () => { document.title = "OpenApp Hub"; };
+  }, []);
+
   return (
     <>
       <Header showPublish={false} />
