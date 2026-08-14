@@ -144,7 +144,12 @@ func main() {
 	http.HandleFunc("/api/apps/", getApp)
 
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("ok"))
+		enableCORS(w)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{
+			"status":  "working fine",
+			"service": "openapp-hub-api",
+		})
 	})
 
 	log.Println("OpenApp Hub backend running on :8080")
