@@ -45,80 +45,104 @@ export default function AppDetailPage() {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-zinc-50">
-        <p className="text-zinc-500">Loading...</p>
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--border)] border-t-[var(--accent)]" />
       </div>
     );
   }
 
   if (error || !app) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center bg-zinc-50">
-        <p className="text-zinc-600">{error || "App not found"}</p>
-        <Link href="/" className="mt-4 text-sm underline">
-          ← Back to home
-        </Link>
+      <div className="flex min-h-screen flex-col items-center justify-center px-4">
+        <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] px-8 py-12 text-center">
+          <p className="text-lg text-[var(--muted)]">
+            {error || "App not found"}
+          </p>
+          <Link
+            href="/"
+            className="mt-4 inline-block text-sm font-medium text-[var(--accent)] hover:underline"
+          >
+            ← Back to home
+          </Link>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-zinc-50 text-zinc-900">
-      <header className="border-b bg-white">
-        <div className="mx-auto flex max-w-3xl items-center justify-between px-4 py-4">
-          <Link href="/" className="text-xl font-bold tracking-tight">
-            OpenApp Hub
+    <div className="min-h-screen">
+      <header className="sticky top-0 z-50 border-b border-[var(--border)] bg-[var(--background)]/80 backdrop-blur-md">
+        <div className="mx-auto flex max-w-2xl items-center justify-between px-4 py-4">
+          <Link href="/" className="flex items-center gap-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--accent)] text-sm font-bold text-white">
+              O
+            </div>
+            <span className="text-lg font-semibold tracking-tight">
+              OpenApp Hub
+            </span>
           </Link>
-          <Link href="/" className="text-sm text-zinc-600 hover:text-zinc-900">
+          <Link
+            href="/"
+            className="text-sm text-[var(--muted)] transition hover:text-white"
+          >
             ← All apps
           </Link>
         </div>
       </header>
 
-      <main className="mx-auto max-w-3xl px-4 py-10">
-        <h1 className="text-3xl font-bold tracking-tight">{app.name}</h1>
-        <p className="mt-1 text-sm text-zinc-500">
-          Published by {app.publisher || "Anonymous"}
-        </p>
+      <main className="mx-auto max-w-2xl px-4 py-12">
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
+            {app.name}
+          </h1>
+          <p className="mt-2 text-sm text-[var(--muted)]">
+            Published by {app.publisher || "Anonymous"}
+          </p>
+        </div>
 
-        <section className="mt-8 rounded-xl border bg-white p-6">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">
-            Problem it solves
-          </h2>
-          <p className="mt-2 whitespace-pre-wrap text-zinc-800">{app.problem}</p>
-        </section>
-
-        {app.significance && (
-          <section className="mt-4 rounded-xl border bg-white p-6">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">
-              Why it matters
+        <div className="space-y-4">
+          <section className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-6">
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
+              Problem it solves
             </h2>
-            <p className="mt-2 whitespace-pre-wrap text-zinc-800">
-              {app.significance}
+            <p className="mt-3 whitespace-pre-wrap leading-relaxed text-zinc-200">
+              {app.problem}
             </p>
           </section>
-        )}
 
-        {app.how_to_use && (
-          <section className="mt-4 rounded-xl border bg-white p-6">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">
-              How to use it
-            </h2>
-            <p className="mt-2 whitespace-pre-wrap text-zinc-800">
-              {app.how_to_use}
-            </p>
-          </section>
-        )}
+          {app.significance && (
+            <section className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-6">
+              <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
+                Why it matters
+              </h2>
+              <p className="mt-3 whitespace-pre-wrap leading-relaxed text-zinc-200">
+                {app.significance}
+              </p>
+            </section>
+          )}
+
+          {app.how_to_use && (
+            <section className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-6">
+              <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
+                How to use it
+              </h2>
+              <p className="mt-3 whitespace-pre-wrap leading-relaxed text-zinc-200">
+                {app.how_to_use}
+              </p>
+            </section>
+          )}
+        </div>
 
         {app.download_url && (
-          <div className="mt-8">
+          <div className="mt-10">
             <a
               href={app.download_url}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center rounded-lg bg-zinc-900 px-5 py-3 font-medium text-white hover:bg-zinc-700"
+              className="inline-flex items-center gap-2 rounded-xl bg-[var(--accent)] px-6 py-3.5 font-medium text-white transition hover:bg-[var(--accent-hover)]"
             >
-              Get the app →
+              Get the app
+              <span aria-hidden>→</span>
             </a>
           </div>
         )}
