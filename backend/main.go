@@ -4,16 +4,19 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-	"sync"
+	"os"
 	"time"
 
 	"github.com/google/uuid"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 type App struct {
-	ID           string    `json:"id"`
-	Name         string    `json:"name"`
-	Problem      string    `json:"problem"`
+	ID           string    `json:"id" gorm:"primaryKey"`
+	Name         string    `json:"name" gorm:"not null"`
+	Problem      string    `json:"problem" gorm:"not null"`
 	Significance string    `json:"significance"`
 	HowToUse     string    `json:"how_to_use"`
 	DownloadURL  string    `json:"download_url"`
@@ -21,10 +24,7 @@ type App struct {
 	CreatedAt    time.Time `json:"created_at"`
 }
 
-var (
-	apps  = make(map[string]App)
-	mutex sync.RWMutex
-)
+var db *gorm.DB
 
 func enableCORS(w http.ResponseWriter) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -39,16 +39,14 @@ func listApps(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mutex.RLock()
-	defer mutex.RUnlock()
-
-	list := make([]App, 0, len(apps))
-	for _, a := range apps {
-		list = append(list, a)
+	var apps []App
+	if err := db.Order("created_at desc").Find(&apps).Error; err != nil {
+		http.Error(w, "failed to fetch apps", http.StatusInternalServerError)
+		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(list)
+	json.NewEncoder(w).Encode(apps)
 }
 
 func getApp(w http.ResponseWriter, r *http.Request) {
@@ -64,11 +62,8 @@ func getApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mutex.RLock()
-	app, ok := apps[id]
-	mutex.RUnlock()
-
-	if !ok {
+	var app App
+	if err := db.First(&app, "id = ?", id).Error; err != nil {
 		http.Error(w, "app not found", http.StatusNotFound)
 		return
 	}
@@ -119,9 +114,10 @@ func createApp(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:    time.Now().UTC(),
 	}
 
-	mutex.Lock()
-	apps[app.ID] = app
-	mutex.Unlock()
+	if err := db.Create(&app).Error; err != nil {
+		http.Error(w, "failed to create app", http.StatusInternalServerError)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -129,6 +125,26 @@ func createApp(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		log.Fatal("DATABASE_URL environment variable is required")
+	}
+
+	var err error
+	db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Info),
+	})
+	if err != nil {
+		log.Fatal("failed to connect to database:", err)
+	}
+
+	// Auto migrate the App table
+	if err := db.AutoMigrate(&App{}); err != nil {
+		log.Fatal("failed to migrate database:", err)
+	}
+
+	log.Println("Connected to Neon database successfully")
+
 	http.HandleFunc("/api/apps", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet || r.Method == http.MethodOptions {
 			listApps(w, r)
@@ -146,12 +162,25 @@ func main() {
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		enableCORS(w)
 		w.Header().Set("Content-Type", "application/json")
+
+		// Simple DB check
+		sqlDB, err := db.DB()
+		status := "working fine"
+		if err != nil || sqlDB.Ping() != nil {
+			status = "database connection problem"
+		}
+
 		json.NewEncoder(w).Encode(map[string]string{
-			"status":  "working fine",
+			"status":  status,
 			"service": "openapp-hub-api",
 		})
 	})
 
-	log.Println("OpenApp Hub backend running on :8080")
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+
+	log.Println("OpenApp Hub backend running on :" + port)
+	log.Fatal(http.ListenAndServe(":"+port, nil))
 }
