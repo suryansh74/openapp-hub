@@ -42,6 +42,7 @@ type App struct {
 	IconURL         string         `json:"icon_url"`
 	Screenshots     datatypes.JSON `json:"screenshots" gorm:"type:jsonb;default:'[]'"` // []string
 	YoutubeURL      string         `json:"youtube_url"`
+	Links           datatypes.JSON `json:"links" gorm:"type:jsonb;default:'[]'"` // [{label,url,note}]
 	Publisher       string         `json:"publisher"`
 	PublisherAvatar string         `json:"publisher_avatar"`
 	UserID          string         `json:"user_id" gorm:"index"`
@@ -165,14 +166,15 @@ func createApp(w http.ResponseWriter, r *http.Request) {
 		HowToUse        string   `json:"how_to_use"`
 		DownloadURL     string   `json:"download_url"`
 		IconURL         string   `json:"icon_url"`
-		Screenshots     []string `json:"screenshots"`
-		YoutubeURL      string   `json:"youtube_url"`
-		Publisher       string   `json:"publisher"`
-		PublisherAvatar string   `json:"publisher_avatar"`
-		UserEmail       string   `json:"user_email"`
-		UserName        string   `json:"user_name"`
-		UserAvatar      string   `json:"user_avatar"`
-		Provider        string   `json:"provider"`
+		Screenshots     []string                 `json:"screenshots"`
+		YoutubeURL      string                   `json:"youtube_url"`
+		Links           []map[string]interface{} `json:"links"`
+		Publisher       string                   `json:"publisher"`
+		PublisherAvatar string                   `json:"publisher_avatar"`
+		UserEmail       string                   `json:"user_email"`
+		UserName        string                   `json:"user_name"`
+		UserAvatar      string                   `json:"user_avatar"`
+		Provider        string                   `json:"provider"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
@@ -208,11 +210,15 @@ func createApp(w http.ResponseWriter, r *http.Request) {
 	if input.Screenshots == nil {
 		ss = []byte("[]")
 	}
+	lk, _ := json.Marshal(input.Links)
+	if input.Links == nil {
+		lk = []byte("[]")
+	}
 
 	app := App{
 		ID: uuid.New().String(), Name: input.Name, Problem: input.Problem, Significance: input.Significance,
 		HowToUse: input.HowToUse, DownloadURL: input.DownloadURL, IconURL: input.IconURL,
-		Screenshots: datatypes.JSON(ss), YoutubeURL: input.YoutubeURL,
+		Screenshots: datatypes.JSON(ss), YoutubeURL: input.YoutubeURL, Links: datatypes.JSON(lk),
 		Publisher: input.Publisher, PublisherAvatar: input.PublisherAvatar, UserID: userID,
 		CreatedAt: now, UpdatedAt: now,
 	}
@@ -262,6 +268,10 @@ func updateApp(w http.ResponseWriter, r *http.Request) {
 	if v, ok := input["screenshots"]; ok {
 		b, _ := json.Marshal(v)
 		updates["screenshots"] = datatypes.JSON(b)
+	}
+	if v, ok := input["links"]; ok {
+		b, _ := json.Marshal(v)
+		updates["links"] = datatypes.JSON(b)
 	}
 
 	if err := db.Model(&app).Updates(updates).Error; err != nil {

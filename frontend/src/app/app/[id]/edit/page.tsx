@@ -13,6 +13,8 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 const MAX_SHOTS = 6;
 const MAX_SIZE = 1 * 1024 * 1024; // 1MB
 
+type AppLink = { label: string; url: string; note: string };
+
 type App = {
   id: string;
   name: string;
@@ -65,6 +67,7 @@ export default function EditAppPage() {
     publisher: "",
   });
   const [shots, setShots] = useState<string[]>([]);
+  const [links, setLinks] = useState<AppLink[]>([]);
 
   const iconInputRef = useRef<HTMLInputElement>(null);
   const shotsInputRef = useRef<HTMLInputElement>(null);
@@ -98,6 +101,17 @@ export default function EditAppPage() {
           publisher: data.publisher || "",
         });
         setShots(list);
+        let linkList: AppLink[] = [];
+        try {
+          const raw = (data as any).links;
+          if (Array.isArray(raw)) linkList = raw;
+          else if (typeof raw === "string") linkList = JSON.parse(raw || "[]");
+        } catch {}
+        setLinks(linkList.map((l: any) => ({
+          label: l.label || "",
+          url: l.url || "",
+          note: l.note || "",
+        })));
         setLoading(false);
       })
       .catch((err) => {
@@ -167,6 +181,7 @@ export default function EditAppPage() {
       const payload = {
         ...form,
         screenshots: shots,
+        links: links.filter((l) => l.url.trim()),
         publisher_avatar: session?.user?.image || "",
       };
 
@@ -394,6 +409,72 @@ export default function EditAppPage() {
             <p className="text-xs text-[var(--muted)]">
               Upload up to {MAX_SHOTS} images · Max 1MB each · Select multiple at once
             </p>
+          </div>
+
+          {/* Extra links */}
+          <div>
+            <div className="mb-2 flex items-center justify-between">
+              <label className="text-sm font-medium">More links</label>
+              <button
+                type="button"
+                onClick={() => setLinks((prev) => [...prev, { label: "", url: "", note: "" }])}
+                className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-xs transition hover:bg-[var(--card)]"
+              >
+                + Add link
+              </button>
+            </div>
+            <p className="mb-3 text-xs text-[var(--muted)]">
+              GitHub, portfolio, LinkedIn, docs, demo — any related source with a short note.
+            </p>
+            <div className="space-y-3">
+              {links.map((link, i) => (
+                <div key={i} className="space-y-2 rounded-xl border border-[var(--border)] bg-[var(--card)] p-3">
+                  <div className="flex gap-2">
+                    <input
+                      value={link.label}
+                      onChange={(e) =>
+                        setLinks((prev) =>
+                          prev.map((l, idx) => (idx === i ? { ...l, label: e.target.value } : l))
+                        )
+                      }
+                      placeholder="Label (e.g. GitHub)"
+                      className="w-1/3 rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)]"
+                    />
+                    <input
+                      value={link.url}
+                      onChange={(e) =>
+                        setLinks((prev) =>
+                          prev.map((l, idx) => (idx === i ? { ...l, url: e.target.value } : l))
+                        )
+                      }
+                      placeholder="https://..."
+                      type="url"
+                      className="flex-1 rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)]"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setLinks((prev) => prev.filter((_, idx) => idx !== i))}
+                      className="px-2 text-sm text-red-500 hover:underline"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <input
+                    value={link.note}
+                    onChange={(e) =>
+                      setLinks((prev) =>
+                        prev.map((l, idx) => (idx === i ? { ...l, note: e.target.value } : l))
+                      )
+                    }
+                    placeholder="Short note (optional)"
+                    className="w-full rounded-lg border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)]"
+                  />
+                </div>
+              ))}
+              {links.length === 0 && (
+                <p className="text-xs text-[var(--muted)]">No extra links yet.</p>
+              )}
+            </div>
           </div>
 
           <div>

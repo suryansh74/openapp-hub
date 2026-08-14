@@ -21,6 +21,7 @@ type App = {
   icon_url: string;
   screenshots: string[] | string;
   youtube_url: string;
+  links?: { label?: string; url: string; note?: string }[] | string;
   publisher: string;
   publisher_avatar: string;
   likes_count: number;
@@ -620,6 +621,13 @@ export default function AppDetailPage() {
 
   const screenshots = parseScreenshots(app.screenshots);
   const embedUrl = getYoutubeEmbed(app.youtube_url || "");
+  let appLinks: { label?: string; url: string; note?: string }[] = [];
+  try {
+    const raw = app.links;
+    if (Array.isArray(raw)) appLinks = raw;
+    else if (typeof raw === "string") appLinks = JSON.parse(raw || "[]");
+  } catch {}
+  appLinks = appLinks.filter((l) => l && l.url);
   const topComments = comments.filter((c) => !c.parent_id);
 
   return (
@@ -865,6 +873,31 @@ export default function AppDetailPage() {
                 </div>
               </dl>
             </div>
+
+            {appLinks.length > 0 && (
+              <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-5">
+                <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-[var(--muted)]">
+                  Links
+                </h3>
+                <ul className="space-y-3">
+                  {appLinks.map((l, i) => (
+                    <li key={i}>
+                      <a
+                        href={l.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-sm font-medium text-[var(--accent)] hover:underline"
+                      >
+                        {l.label || l.url}
+                      </a>
+                      {l.note && (
+                        <p className="mt-0.5 text-xs text-[var(--muted)]">{l.note}</p>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </aside>
         </div>
       </main>
