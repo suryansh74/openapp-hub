@@ -23,13 +23,16 @@ import (
 const MaxUploadBytes = 1 << 20 // 1 MB
 
 type User struct {
-	ID        string    `json:"id" gorm:"primaryKey"`
-	Email     string    `json:"email" gorm:"uniqueIndex;not null"`
-	Name      string    `json:"name"`
-	AvatarURL string    `json:"avatar_url"`
-	Provider  string    `json:"provider"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID        string         `json:"id" gorm:"primaryKey"`
+	Email     string         `json:"email" gorm:"uniqueIndex;not null"`
+	Username  string         `json:"username" gorm:"index"` // lowercase handle; uniqueness enforced in app (empty allowed for incomplete profiles)
+	Name      string         `json:"name"`                        // display name (not unique)
+	AvatarURL string         `json:"avatar_url"`
+	Bio       string         `json:"bio"`
+	Links     datatypes.JSON `json:"links" gorm:"type:jsonb;default:'[]'"`
+	Provider  string         `json:"provider"`
+	CreatedAt time.Time      `json:"created_at"`
+	UpdatedAt time.Time      `json:"updated_at"`
 }
 
 type App struct {
@@ -43,9 +46,10 @@ type App struct {
 	Screenshots     datatypes.JSON `json:"screenshots" gorm:"type:jsonb;default:'[]'"` // []string
 	YoutubeURL      string         `json:"youtube_url"`
 	Links           datatypes.JSON `json:"links" gorm:"type:jsonb;default:'[]'"` // [{label,url,note}]
-	Publisher       string         `json:"publisher"`
-	PublisherAvatar string         `json:"publisher_avatar"`
-	UserID          string         `json:"user_id" gorm:"index"`
+	Publisher         string         `json:"publisher"`
+	PublisherAvatar   string         `json:"publisher_avatar"`
+	PublisherUsername string         `json:"publisher_username"`
+	UserID            string         `json:"user_id" gorm:"index"`
 	LikesCount      int            `json:"likes_count" gorm:"default:0"`
 	DislikesCount   int            `json:"dislikes_count" gorm:"default:0"`
 	CreatedAt       time.Time      `json:"created_at"`
@@ -206,6 +210,20 @@ func createApp(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	publisherUsername := ""
+	if userID != "" {
+		var u User
+		if err := db.First(&u, "id = ?", userID).Error; err == nil {
+			publisherUsername = u.Username
+			if input.Publisher == "" && u.Name != "" {
+				input.Publisher = u.Name
+			}
+			if input.PublisherAvatar == "" {
+				input.PublisherAvatar = u.AvatarURL
+			}
+		}
+	}
+
 	ss, _ := json.Marshal(input.Screenshots)
 	if input.Screenshots == nil {
 		ss = []byte("[]")
@@ -219,7 +237,8 @@ func createApp(w http.ResponseWriter, r *http.Request) {
 		ID: uuid.New().String(), Name: input.Name, Problem: input.Problem, Significance: input.Significance,
 		HowToUse: input.HowToUse, DownloadURL: input.DownloadURL, IconURL: input.IconURL,
 		Screenshots: datatypes.JSON(ss), YoutubeURL: input.YoutubeURL, Links: datatypes.JSON(lk),
-		Publisher: input.Publisher, PublisherAvatar: input.PublisherAvatar, UserID: userID,
+		Publisher: input.Publisher, PublisherAvatar: input.PublisherAvatar,
+		PublisherUsername: publisherUsername, UserID: userID,
 		CreatedAt: now, UpdatedAt: now,
 	}
 	if err := db.Create(&app).Error; err != nil {
@@ -651,7 +670,141 @@ func uploadImage(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"url": resp.SecureURL})
 }
 
-// --- Users ---
+// --- Users / username ---
+
+var reservedUsernames = map[string]bool{
+	"admin": true, "api": true, "login": true, "logout": true, "signup": true,
+	"register": true, "publish": true, "profile": true, "settings": true,
+	"help": true, "support": true, "about": true, "openapp": true, "openapphub": true,
+	"root": true, "null": true, "me": true, "u": true, "app": true, "apps": true,
+	"auth": true, "oauth": true, "callback": true, "health": true, "public": true,
+	"static": true, "assets": true, "favicon": true, "robots": true,
+}
+
+func normalizeUsername(s string) string {
+	return strings.ToLower(strings.TrimSpace(s))
+}
+
+func validUsernameFormat(u string) bool {
+	if len(u) < 3 || len(u) > 30 {
+		return false
+	}
+	for i, c := range u {
+		if c >= 'a' && c <= 'z' {
+			continue
+		}
+		if c >= '0' && c <= '9' {
+			continue
+		}
+		if c == '_' && i > 0 {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func isUsernameAvailable(username, exceptUserID string) (bool, string) {
+	u := normalizeUsername(username)
+	if !validUsernameFormat(u) {
+		return false, "Username must be 3–30 chars: a-z, 0-9, underscore (not starting with _)"
+	}
+	if reservedUsernames[u] {
+		return false, "This username is reserved"
+	}
+	var existing User
+	q := db.Where("username = ?", u)
+	if exceptUserID != "" {
+		q = q.Where("id <> ?", exceptUserID)
+	}
+	err := q.First(&existing).Error
+	if err == nil {
+		return false, "Username is already taken"
+	}
+	return true, ""
+}
+
+func checkUsername(w http.ResponseWriter, r *http.Request) {
+	enableCORS(w)
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	u := normalizeUsername(r.URL.Query().Get("u"))
+	except := r.URL.Query().Get("except_user_id")
+	ok, reason := isUsernameAvailable(u, except)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"username":  u,
+		"available": ok,
+		"reason":    reason,
+	})
+}
+
+// publicUser strips email for public responses
+func publicUser(u User) map[string]interface{} {
+	var links interface{}
+	if len(u.Links) > 0 {
+		_ = json.Unmarshal(u.Links, &links)
+	}
+	if links == nil {
+		links = []interface{}{}
+	}
+	return map[string]interface{}{
+		"id":         u.ID,
+		"username":   u.Username,
+		"name":       u.Name,
+		"avatar_url": u.AvatarURL,
+		"bio":        u.Bio,
+		"links":      links,
+		"provider":   u.Provider,
+		"created_at": u.CreatedAt,
+	}
+}
+
+func getPublicUser(w http.ResponseWriter, r *http.Request) {
+	enableCORS(w)
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	// /api/users/by-username/foo  or query ?username=
+	path := strings.TrimPrefix(r.URL.Path, "/api/users/by-username/")
+	username := normalizeUsername(path)
+	if username == "" || username == r.URL.Path {
+		username = normalizeUsername(r.URL.Query().Get("username"))
+	}
+	if username == "" {
+		http.Error(w, "username required", http.StatusBadRequest)
+		return
+	}
+	var user User
+	if err := db.Where("username = ?", username).First(&user).Error; err != nil {
+		http.Error(w, "user not found", http.StatusNotFound)
+		return
+	}
+
+	// stats
+	var appCount int64
+	var likesSum int64
+	db.Model(&App{}).Where("user_id = ?", user.ID).Count(&appCount)
+	db.Model(&App{}).Where("user_id = ?", user.ID).Select("coalesce(sum(likes_count),0)").Scan(&likesSum)
+
+	var apps []App
+	db.Where("user_id = ?", user.ID).Order("created_at desc").Find(&apps)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"user":       publicUser(user),
+		"app_count":  appCount,
+		"likes_sum":  likesSum,
+		"apps":       apps,
+	})
+}
 
 func upsertUser(w http.ResponseWriter, r *http.Request) {
 	enableCORS(w)
@@ -670,19 +823,26 @@ func upsertUser(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "user not found", http.StatusNotFound)
 			return
 		}
+		// owner view includes email
+		out := publicUser(user)
+		out["email"] = user.Email
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(user)
+		json.NewEncoder(w).Encode(out)
 		return
 	}
-	if r.Method != http.MethodPost && r.Method != http.MethodPut {
+	if r.Method != http.MethodPost && r.Method != http.MethodPut && r.Method != http.MethodPatch {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	var input struct {
-		Email     string `json:"email"`
-		Name      string `json:"name"`
-		AvatarURL string `json:"avatar_url"`
-		Provider  string `json:"provider"`
+		Email     string                   `json:"email"`
+		Username  string                   `json:"username"`
+		Name      string                   `json:"name"`
+		AvatarURL string                   `json:"avatar_url"`
+		Bio       string                   `json:"bio"`
+		Links     []map[string]interface{} `json:"links"`
+		Provider  string                   `json:"provider"`
+		Suggested string                   `json:"suggested_username"` // optional hint from OAuth
 	}
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil || input.Email == "" {
 		http.Error(w, "email required", http.StatusBadRequest)
@@ -692,8 +852,31 @@ func upsertUser(w http.ResponseWriter, r *http.Request) {
 	var user User
 	err := db.Where("email = ?", input.Email).First(&user).Error
 	if err == gorm.ErrRecordNotFound {
-		user = User{ID: uuid.New().String(), Email: input.Email, Name: input.Name, AvatarURL: input.AvatarURL, Provider: input.Provider, CreatedAt: now, UpdatedAt: now}
-		db.Create(&user)
+		// suggest username if provided and free
+		uname := ""
+		candidate := normalizeUsername(input.Username)
+		if candidate == "" {
+			candidate = normalizeUsername(input.Suggested)
+		}
+		if candidate != "" {
+			if ok, _ := isUsernameAvailable(candidate, ""); ok {
+				uname = candidate
+			}
+		}
+		linksJSON := []byte("[]")
+		if input.Links != nil {
+			linksJSON, _ = json.Marshal(input.Links)
+		}
+		user = User{
+			ID: uuid.New().String(), Email: input.Email, Username: uname,
+			Name: input.Name, AvatarURL: input.AvatarURL, Bio: input.Bio,
+			Links: datatypes.JSON(linksJSON), Provider: input.Provider,
+			CreatedAt: now, UpdatedAt: now,
+		}
+		if err := db.Create(&user).Error; err != nil {
+			http.Error(w, "failed to create user", http.StatusInternalServerError)
+			return
+		}
 	} else if err == nil {
 		updates := map[string]interface{}{"updated_at": now}
 		if input.Name != "" {
@@ -702,12 +885,45 @@ func upsertUser(w http.ResponseWriter, r *http.Request) {
 		if input.AvatarURL != "" {
 			updates["avatar_url"] = input.AvatarURL
 		}
+		if input.Bio != "" || r.Method == http.MethodPatch {
+			// allow clearing bio on explicit patch with empty? only set if key sent — keep simple
+			updates["bio"] = input.Bio
+		}
+		if input.Links != nil {
+			b, _ := json.Marshal(input.Links)
+			updates["links"] = datatypes.JSON(b)
+		}
+		if input.Username != "" {
+			u := normalizeUsername(input.Username)
+			if u != user.Username {
+				ok, reason := isUsernameAvailable(u, user.ID)
+				if !ok {
+					http.Error(w, reason, http.StatusConflict)
+					return
+				}
+				updates["username"] = u
+			}
+		}
 		db.Model(&user).Updates(updates)
 		db.First(&user, "id = ?", user.ID)
+		// sync publisher fields on apps if username/name/avatar changed
+		if user.Username != "" {
+			db.Model(&App{}).Where("user_id = ?", user.ID).Updates(map[string]interface{}{
+				"publisher":          user.Name,
+				"publisher_avatar":   user.AvatarURL,
+				"publisher_username": user.Username,
+			})
+		}
+	} else {
+		http.Error(w, "database error", http.StatusInternalServerError)
+		return
 	}
+	out := publicUser(user)
+	out["email"] = user.Email
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(user)
+	json.NewEncoder(w).Encode(out)
 }
+
 
 func main() {
 	dsn := os.Getenv("DATABASE_URL")
@@ -811,6 +1027,8 @@ func main() {
 	http.HandleFunc("/api/upload", uploadImage)
 	http.HandleFunc("/api/users", upsertUser)
 	http.HandleFunc("/api/user", upsertUser)
+	http.HandleFunc("/api/username/check", checkUsername)
+	http.HandleFunc("/api/users/by-username/", getPublicUser)
 
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		enableCORS(w)

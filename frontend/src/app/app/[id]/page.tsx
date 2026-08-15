@@ -24,6 +24,7 @@ type App = {
   links?: { label?: string; url: string; note?: string }[] | string;
   publisher: string;
   publisher_avatar: string;
+  publisher_username?: string;
   likes_count: number;
   dislikes_count: number;
   created_at: string;
@@ -662,7 +663,13 @@ export default function AppDetailPage() {
                 <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">{app.name}</h1>
                 <div className="mt-2 flex items-center gap-2 text-sm text-[var(--muted)]">
                   <Avatar src={app.publisher_avatar} name={app.publisher} size={22} />
-                  <span>Published by {app.publisher || "Anonymous"}</span>
+                  {app.publisher_username ? (
+                    <Link href={`/u/${app.publisher_username}`} className="hover:text-[var(--foreground)] hover:underline">
+                      Published by {app.publisher || app.publisher_username}
+                    </Link>
+                  ) : (
+                    <span>Published by {app.publisher || "Anonymous"}</span>
+                  )}
                 </div>
               </div>
             </div>
@@ -872,7 +879,13 @@ export default function AppDetailPage() {
                   <dt className="text-[var(--muted)]">Publisher</dt>
                   <dd className="mt-0.5 flex items-center gap-2 font-medium">
                     <Avatar src={app.publisher_avatar} name={app.publisher} size={20} />
-                    {app.publisher || "Anonymous"}
+                    {app.publisher_username ? (
+                      <Link href={`/u/${app.publisher_username}`} className="hover:underline">
+                        {app.publisher || app.publisher_username}
+                      </Link>
+                    ) : (
+                      app.publisher || "Anonymous"
+                    )}
                   </dd>
                 </div>
                 <div>

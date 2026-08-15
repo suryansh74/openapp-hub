@@ -58,9 +58,27 @@ export default function PublishPage() {
   const shotsInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (status === "unauthenticated") router.push("/login");
+    if (status === "unauthenticated") {
+      router.push("/login");
+      return;
+    }
     if (session?.user) {
       setForm((prev) => ({ ...prev, publisher: session.user?.name || prev.publisher }));
+      // Require username before publishing
+      fetch(`${API_URL}/api/user?email=${encodeURIComponent(session.user.email || "")}`)
+        .then(async (r) => {
+          if (r.status === 404) {
+            router.push("/profile");
+            return null;
+          }
+          return r.ok ? r.json() : null;
+        })
+        .then((data) => {
+          if (data && !data.username) {
+            router.push("/profile");
+          }
+        })
+        .catch(() => {});
     }
   }, [status, session, router]);
 

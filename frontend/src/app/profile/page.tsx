@@ -1,178 +1,369 @@
-'use client';
+"use client";
 
-import { useState, useEffect } from 'react';
-import { useSession } from 'next-auth/react';
-import { useRouter } from 'next/navigation';
-import Image from 'next/image';
+import { useState, useEffect, useRef, useCallback } from "react";
+import { useSession } from "next-auth/react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import Image from "next/image";
+import Header from "@/components/Header";
+import Footer from "@/components/Footer";
+import { useToast } from "@/components/Toast";
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+const MAX_SIZE = 1 * 1024 * 1024;
+
+type AppLink = { label: string; url: string; note: string };
+
+async function uploadFile(file: File): Promise<string> {
+  if (file.size > MAX_SIZE) throw new Error("Image must be under 1MB");
+  const fd = new FormData();
+  fd.append("file", file);
+  const res = await fetch(`${API_URL}/api/upload`, { method: "POST", body: fd });
+  if (!res.ok) throw new Error(await res.text() || "Upload failed");
+  const data = await res.json();
+  return data.url as string;
+}
 
 export default function ProfilePage() {
-  const { data: session } = useSession();
+  const { data: session, status } = useSession();
+  const router = useRouter();
+  const { toast } = useToast();
+
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
+
+  const [userId, setUserId] = useState("");
+  const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
+  const [originalUsername, setOriginalUsername] = useState("");
+  const [name, setName] = useState("");
+  const [avatar, setAvatar] = useState("");
+  const [bio, setBio] = useState("");
+  const [links, setLinks] = useState<AppLink[]>([]);
+
+  const [usernameStatus, setUsernameStatus] = useState<"idle" | "checking" | "ok" | "bad">("idle");
+  const [usernameReason, setUsernameReason] = useState("");
+  const checkTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
     document.title = "Profile · OpenApp Hub";
-    return () => { document.title = "OpenApp Hub"; };
+    return () => {
+      document.title = "OpenApp Hub";
+    };
   }, []);
 
-  const router = useRouter();
-  const [avatar, setAvatar] = useState('');
-  const [name, setName] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [uploading, setUploading] = useState(false);
-  const [message, setMessage] = useState('');
-
-  // Fetch current user data (including avatar)
   useEffect(() => {
-    if (!session?.user?.email) {
-      router.push('/');
+    if (status === "unauthenticated") {
+      router.push("/login");
       return;
     }
-    fetchUserData();
-  }, [session]);
+    if (!session?.user?.email) return;
 
-  const fetchUserData = async () => {
-    try {
-      const res = await fetch('/api/user', {
-        credentials: 'include',
-      });
-      const data = await res.json();
-      if (data.success) {
-        setName(data.user.name || data.user.email.split('@')[0]);
-        setAvatar(data.user.avatar || '/placeholder-avatar.png');
+    fetch(`${API_URL}/api/user?email=${encodeURIComponent(session.user.email)}`)
+      .then(async (r) => {
+        if (r.status === 404) {
+          // create skeleton
+          const res = await fetch(`${API_URL}/api/users`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              email: session.user!.email,
+              name: session.user!.name || "",
+              avatar_url: session.user!.image || "",
+              provider: "oauth",
+            }),
+          });
+          return res.json();
+        }
+        if (!r.ok) throw new Error("Failed to load profile");
+        return r.json();
+      })
+      .then((data) => {
+        setUserId(data.id || "");
+        setEmail(data.email || session.user!.email || "");
+        setUsername(data.username || "");
+        setOriginalUsername(data.username || "");
+        setName(data.name || session.user!.name || "");
+        setAvatar(data.avatar_url || session.user!.image || "");
+        setBio(data.bio || "");
+        let lk: AppLink[] = [];
+        try {
+          if (Array.isArray(data.links)) lk = data.links;
+        } catch {}
+        setLinks(lk.map((l: any) => ({ label: l.label || "", url: l.url || "", note: l.note || "" })));
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  }, [session, status, router]);
+
+  const checkUsername = useCallback(
+    (value: string) => {
+      const v = value.trim().toLowerCase();
+      if (checkTimer.current) clearTimeout(checkTimer.current);
+      if (!v) {
+        setUsernameStatus("idle");
+        setUsernameReason("");
+        return;
       }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
+      if (v === originalUsername) {
+        setUsernameStatus("ok");
+        setUsernameReason("This is your current username");
+        return;
+      }
+      setUsernameStatus("checking");
+      checkTimer.current = setTimeout(async () => {
+        try {
+          const q = new URLSearchParams({ u: v });
+          if (userId) q.set("except_user_id", userId);
+          const r = await fetch(`${API_URL}/api/username/check?${q}`);
+          const data = await r.json();
+          if (data.available) {
+            setUsernameStatus("ok");
+            setUsernameReason("Available");
+          } else {
+            setUsernameStatus("bad");
+            setUsernameReason(data.reason || "Not available");
+          }
+        } catch {
+          setUsernameStatus("bad");
+          setUsernameReason("Could not check username");
+        }
+      }, 350);
+    },
+    [originalUsername, userId]
+  );
+
+  const onUsernameChange = (v: string) => {
+    const cleaned = v.toLowerCase().replace(/[^a-z0-9_]/g, "");
+    setUsername(cleaned);
+    checkUsername(cleaned);
   };
 
-  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleAvatar = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
-    if (!file.type.startsWith('image/')) {
-      alert('Please upload a valid image file');
-      return;
-    }
-
     setUploading(true);
-    const formData = new FormData();
-    formData.append('file', file);
-
     try {
-      const res = await fetch('/api/upload-avatar', {
-        method: 'POST',
-        body: formData,
-      });
-
-      const data = await res.json();
-      if (data.success) {
-        setAvatar(data.url);
-        setMessage('Avatar updated successfully!');
-        // Refresh profile data
-        fetchUserData();
-      } else {
-        setMessage(data.error || 'Upload failed');
-      }
-    } catch (err) {
-      setMessage('Upload failed. Please try again.');
+      const url = await uploadFile(file);
+      setAvatar(url);
+      toast("Avatar uploaded", "success");
+    } catch (err: any) {
+      toast(err.message || "Upload failed", "error");
     } finally {
       setUploading(false);
+      if (fileRef.current) fileRef.current.value = "";
     }
   };
 
-  const handleSaveProfile = async () => {
+  const save = async () => {
+    if (!session?.user?.email) return;
+    if (!username) {
+      toast("Username is required", "error");
+      return;
+    }
+    if (usernameStatus === "bad") {
+      toast(usernameReason || "Username not available", "error");
+      return;
+    }
+    setSaving(true);
     try {
-      const res = await fetch('/api/user', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, avatar }),
-        credentials: 'include',
+      const res = await fetch(`${API_URL}/api/users`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: session.user.email,
+          username,
+          name,
+          avatar_url: avatar,
+          bio,
+          links: links.filter((l) => l.url.trim()),
+          provider: "oauth",
+        }),
       });
-
-      const data = await res.json();
-      if (data.success) {
-        setMessage('Profile updated!');
-      } else {
-        setMessage(data.error || 'Failed to update');
+      if (!res.ok) {
+        const t = await res.text();
+        throw new Error(t || "Failed to save");
       }
-    } catch (err) {
-      setMessage('Something went wrong');
+      const data = await res.json();
+      setOriginalUsername(data.username || username);
+      setUsernameStatus("ok");
+      toast("Profile saved", "success");
+    } catch (err: any) {
+      toast(err.message || "Save failed", "error");
+    } finally {
+      setSaving(false);
     }
   };
 
-  if (loading) return <div className="p-8 text-center">Loading profile...</div>;
+  if (status === "loading" || loading) {
+    return (
+      <>
+        <Header showPublish={false} />
+        <main className="flex flex-1 items-center justify-center">
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--border)] border-t-[var(--accent)]" />
+        </main>
+        <Footer />
+      </>
+    );
+  }
+
+  const needsUsername = !originalUsername;
 
   return (
-    <div className="min-h-screen bg-gray-950 text-white p-6">
-      <div className="max-w-4xl mx-auto">
-        <h1 className="text-4xl font-bold mb-8">My Profile</h1>
+    <>
+      <Header showPublish={false} />
+      <main className="mx-auto w-full max-w-xl flex-1 px-4 py-12">
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold tracking-tight">
+            {needsUsername ? "Choose a username" : "Your profile"}
+          </h1>
+          <p className="mt-2 text-sm text-[var(--muted)]">
+            {needsUsername
+              ? "Pick a unique handle so others can find you. You can change it later if it’s free."
+              : "Manage how you appear as a publisher on OpenApp Hub."}
+          </p>
+        </div>
 
-        <div className="bg-gray-900 rounded-3xl p-8 shadow-xl">
-          {/* Avatar Section */}
-          <div className="flex flex-col items-center mb-10">
-            <div className="relative w-40 h-40 mb-6">
-              <Image
-                src={avatar || '/placeholder-avatar.png'}
-                alt="Profile Avatar"
-                fill
-                className="rounded-2xl object-cover ring-4 ring-blue-500"
-              />
-            </div>
-
+        <div className="space-y-5">
+          {/* Avatar */}
+          <div className="flex items-center gap-4">
+            {avatar ? (
+              <Image src={avatar} alt="" width={72} height={72} className="h-18 w-18 rounded-2xl object-cover border border-[var(--border)]" unoptimized />
+            ) : (
+              <div className="flex h-[72px] w-[72px] items-center justify-center rounded-2xl bg-[var(--accent)]/15 text-2xl font-bold text-[var(--accent)]">
+                {(name || username || "?").charAt(0).toUpperCase()}
+              </div>
+            )}
             <div>
-              <label className="block text-sm text-gray-400 mb-2">Avatar (PNG, JPG, WEBP)</label>
-              <input
-                type="file"
-                accept="image/*"
-                onChange={handleAvatarChange}
-                className="block w-full text-sm text-gray-400 file:mr-4 file:py-3 file:px-6 file:rounded-full file:border-0 file:bg-blue-600 file:text-white hover:file:bg-blue-500"
-              />
-              {uploading && <p className="text-blue-400 mt-2">Uploading avatar...</p>}
+              <input ref={fileRef} type="file" accept="image/*" className="hidden" id="avatar-up" onChange={handleAvatar} />
+              <label htmlFor="avatar-up" className="cursor-pointer rounded-lg border border-[var(--border)] px-3 py-2 text-sm hover:bg-[var(--card)]">
+                {uploading ? "Uploading..." : "Change avatar"}
+              </label>
+              <p className="mt-1 text-xs text-[var(--muted)]">Max 1MB</p>
             </div>
           </div>
 
-          {/* Name Section */}
-          <div className="mb-8">
-            <label className="block text-sm text-gray-400 mb-2">Display Name</label>
+          {/* Username */}
+          <div>
+            <label className="mb-1.5 block text-sm font-medium">
+              Username <span className="text-red-500">*</span>
+            </label>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[var(--muted)]">@</span>
+              <input
+                value={username}
+                onChange={(e) => onUsernameChange(e.target.value)}
+                className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] py-3 pl-8 pr-4 text-sm outline-none focus:border-[var(--accent)]"
+                placeholder="your_handle"
+                autoComplete="off"
+              />
+            </div>
+            <p
+              className={`mt-1.5 text-xs ${
+                usernameStatus === "ok"
+                  ? "text-emerald-500"
+                  : usernameStatus === "bad"
+                    ? "text-red-500"
+                    : "text-[var(--muted)]"
+              }`}
+            >
+              {usernameStatus === "checking"
+                ? "Checking..."
+                : usernameReason || "3–30 characters · a-z, 0-9, underscore"}
+            </p>
+          </div>
+
+          <div>
+            <label className="mb-1.5 block text-sm font-medium">Display name</label>
             <input
-              type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full bg-gray-800 border border-gray-700 rounded-2xl px-6 py-4 text-lg focus:outline-none focus:border-blue-500"
+              className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm outline-none focus:border-[var(--accent)]"
+              placeholder="How your name appears"
             />
           </div>
 
-          <div className="flex gap-4">
-            <button
-              onClick={handleSaveProfile}
-              className="flex-1 bg-blue-600 hover:bg-blue-700 transition-colors py-4 rounded-2xl font-semibold text-lg"
-            >
-              Save Profile
-            </button>
-            <button
-              onClick={() => router.push('/')}
-              className="flex-1 border border-gray-700 hover:bg-gray-800 transition-colors py-4 rounded-2xl font-semibold text-lg"
-            >
-              Back to Discover
-            </button>
+          <div>
+            <label className="mb-1.5 block text-sm font-medium">Email</label>
+            <input
+              value={email}
+              disabled
+              className="w-full cursor-not-allowed rounded-xl border border-[var(--border)] bg-[var(--background)] px-4 py-3 text-sm text-[var(--muted)]"
+            />
+            <p className="mt-1 text-xs text-[var(--muted)]">Only you can see this</p>
           </div>
 
-          {message && (
-            <p className={`mt-6 text-center text-sm ${message.includes('success') ? 'text-green-400' : 'text-red-400'}`}>
-              {message}
+          <div>
+            <label className="mb-1.5 block text-sm font-medium">Bio</label>
+            <textarea
+              value={bio}
+              onChange={(e) => setBio(e.target.value)}
+              rows={3}
+              className="w-full resize-none rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm outline-none focus:border-[var(--accent)]"
+              placeholder="Short intro (optional)"
+            />
+          </div>
+
+          {/* Links */}
+          <div>
+            <div className="mb-2 flex items-center justify-between">
+              <label className="text-sm font-medium">Profile links</label>
+              <button
+                type="button"
+                onClick={() => setLinks((p) => [...p, { label: "", url: "", note: "" }])}
+                className="rounded-lg border border-[var(--border)] px-2.5 py-1 text-xs hover:bg-[var(--card)]"
+              >
+                + Add
+              </button>
+            </div>
+            <div className="space-y-2">
+              {links.map((l, i) => (
+                <div key={i} className="flex gap-2">
+                  <input
+                    value={l.label}
+                    onChange={(e) =>
+                      setLinks((p) => p.map((x, idx) => (idx === i ? { ...x, label: e.target.value } : x)))
+                    }
+                    placeholder="Label"
+                    className="w-28 rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-2 text-sm outline-none focus:border-[var(--accent)]"
+                  />
+                  <input
+                    value={l.url}
+                    onChange={(e) =>
+                      setLinks((p) => p.map((x, idx) => (idx === i ? { ...x, url: e.target.value } : x)))
+                    }
+                    placeholder="https://"
+                    className="flex-1 rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 py-2 text-sm outline-none focus:border-[var(--accent)]"
+                  />
+                  <button type="button" onClick={() => setLinks((p) => p.filter((_, idx) => idx !== i))} className="text-red-500 text-sm">
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <button
+            onClick={save}
+            disabled={saving || uploading || usernameStatus === "bad" || usernameStatus === "checking"}
+            className="w-full rounded-xl bg-[var(--accent)] px-4 py-3.5 font-medium text-white transition hover:bg-[var(--accent-hover)] disabled:opacity-50"
+          >
+            {saving ? "Saving..." : needsUsername ? "Save username" : "Save profile"}
+          </button>
+
+          {originalUsername && (
+            <p className="text-center text-sm text-[var(--muted)]">
+              Public profile:{" "}
+              <Link href={`/u/${originalUsername}`} className="text-[var(--accent)] hover:underline">
+                /u/{originalUsername}
+              </Link>
             </p>
           )}
         </div>
-
-        {/* Published Apps Section */}
-        <div className="mt-12">
-          <h2 className="text-2xl font-semibold mb-6">My Published Apps</h2>
-          {/* Here we will add the list of your published apps */}
-          <div className="text-gray-400 text-center py-12">
-            Published apps list will appear here (coming in next update)
-          </div>
-        </div>
-      </div>
-    </div>
+      </main>
+      <Footer />
+    </>
   );
 }
