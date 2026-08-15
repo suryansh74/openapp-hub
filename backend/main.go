@@ -191,36 +191,44 @@ func createApp(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now().UTC()
 	userID := ""
+	publisherUsername := ""
 	if input.UserEmail != "" {
 		var user User
 		err := db.Where("email = ?", input.UserEmail).First(&user).Error
 		if err == gorm.ErrRecordNotFound {
-			user = User{ID: uuid.New().String(), Email: input.UserEmail, Name: input.UserName, AvatarURL: input.UserAvatar, Provider: input.Provider, CreatedAt: now, UpdatedAt: now}
+			// New user — do not steal OAuth name as permanent identity; username set on /profile
+			user = User{
+				ID: uuid.New().String(), Email: input.UserEmail,
+				Name: input.UserName, AvatarURL: input.UserAvatar,
+				Provider: input.Provider, CreatedAt: now, UpdatedAt: now,
+			}
 			db.Create(&user)
 		} else if err == nil {
-			db.Model(&user).Updates(map[string]interface{}{"name": input.UserName, "avatar_url": input.UserAvatar, "updated_at": now})
-			db.First(&user, "id = ?", user.ID)
+			// Existing user: never overwrite their OpenApp Hub profile with OAuth payload
+			// Only fill empty name/avatar from OAuth if still blank
+			updates := map[string]interface{}{"updated_at": now}
+			if user.Name == "" && input.UserName != "" {
+				updates["name"] = input.UserName
+			}
+			if user.AvatarURL == "" && input.UserAvatar != "" {
+				updates["avatar_url"] = input.UserAvatar
+			}
+			if len(updates) > 1 {
+				db.Model(&user).Updates(updates)
+				db.First(&user, "id = ?", user.ID)
+			}
 		}
 		userID = user.ID
+		// Publisher identity always from OpenApp Hub user record
+		publisherUsername = user.Username
 		if user.AvatarURL != "" {
 			input.PublisherAvatar = user.AvatarURL
 		}
-		if user.Name != "" && input.Publisher == "" {
+		// Prefer @username as public publisher label when set
+		if user.Username != "" {
+			input.Publisher = user.Username
+		} else if user.Name != "" {
 			input.Publisher = user.Name
-		}
-	}
-
-	publisherUsername := ""
-	if userID != "" {
-		var u User
-		if err := db.First(&u, "id = ?", userID).Error; err == nil {
-			publisherUsername = u.Username
-			if input.Publisher == "" && u.Name != "" {
-				input.Publisher = u.Name
-			}
-			if input.PublisherAvatar == "" {
-				input.PublisherAvatar = u.AvatarURL
-			}
 		}
 	}
 
@@ -908,8 +916,13 @@ func upsertUser(w http.ResponseWriter, r *http.Request) {
 		db.First(&user, "id = ?", user.ID)
 		// sync publisher fields on apps if username/name/avatar changed
 		if user.Username != "" {
+			pubLabel := user.Username
+			if user.Name != "" {
+				// Keep display flexible: store username as publisher label for cards
+				pubLabel = user.Username
+			}
 			db.Model(&App{}).Where("user_id = ?", user.ID).Updates(map[string]interface{}{
-				"publisher":          user.Name,
+				"publisher":          pubLabel,
 				"publisher_avatar":   user.AvatarURL,
 				"publisher_username": user.Username,
 			})

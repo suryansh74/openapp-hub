@@ -16,6 +16,7 @@ type App = {
   icon_url: string;
   publisher: string;
   publisher_avatar: string;
+  publisher_username?: string;
   created_at: string;
 };
 
@@ -116,30 +117,40 @@ export default function Home() {
         ) : (
           <div className="grid gap-4 sm:grid-cols-2">
             {apps.map((app) => (
-              <Link
+              <div
                 key={app.id}
-                href={`/app/${app.id}`}
                 className="group rounded-2xl border border-[var(--border)] bg-[var(--card)] p-5 transition hover:border-zinc-500/40 hover:bg-[var(--card-hover)]"
               >
-                <div className="flex items-start gap-3.5">
-                  <AppIcon src={app.icon_url} name={app.name} />
-                  <div className="min-w-0 flex-1">
-                    <h2 className="text-lg font-semibold leading-tight">{app.name}</h2>
-                    <p className="mt-1.5 line-clamp-2 text-sm leading-relaxed text-[var(--muted)]">
-                      {app.problem}
-                    </p>
+                <Link href={`/app/${app.id}`} className="block">
+                  <div className="flex items-start gap-3.5">
+                    <AppIcon src={app.icon_url} name={app.name} />
+                    <div className="min-w-0 flex-1">
+                      <h2 className="text-lg font-semibold leading-tight">{app.name}</h2>
+                      <p className="mt-1.5 line-clamp-2 text-sm leading-relaxed text-[var(--muted)]">
+                        {app.problem}
+                      </p>
+                    </div>
                   </div>
-                </div>
+                </Link>
                 <div className="mt-4 flex items-center justify-between text-xs text-[var(--muted)]">
-                  <div className="flex items-center gap-2">
-                    <PublisherAvatar src={app.publisher_avatar} name={app.publisher} />
-                    <span>by {app.publisher || "Anonymous"}</span>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <PublisherAvatar src={app.publisher_avatar} name={app.publisher_username || app.publisher} />
+                    {app.publisher_username ? (
+                      <Link
+                        href={`/u/${app.publisher_username}`}
+                        className="truncate hover:text-[var(--foreground)] hover:underline"
+                      >
+                        @{app.publisher_username}
+                      </Link>
+                    ) : (
+                      <span className="truncate">by {app.publisher || "Anonymous"}</span>
+                    )}
                   </div>
-                  <span className="opacity-0 transition group-hover:opacity-100">
+                  <Link href={`/app/${app.id}`} className="opacity-0 transition group-hover:opacity-100 shrink-0">
                     View →
-                  </span>
+                  </Link>
                 </div>
-              </Link>
+              </div>
             ))}
           </div>
         )}

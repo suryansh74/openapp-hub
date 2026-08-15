@@ -665,7 +665,7 @@ export default function AppDetailPage() {
                   <Avatar src={app.publisher_avatar} name={app.publisher} size={22} />
                   {app.publisher_username ? (
                     <Link href={`/u/${app.publisher_username}`} className="hover:text-[var(--foreground)] hover:underline">
-                      Published by {app.publisher || app.publisher_username}
+                      Published by @{app.publisher_username}
                     </Link>
                   ) : (
                     <span>Published by {app.publisher || "Anonymous"}</span>
@@ -881,7 +881,7 @@ export default function AppDetailPage() {
                     <Avatar src={app.publisher_avatar} name={app.publisher} size={20} />
                     {app.publisher_username ? (
                       <Link href={`/u/${app.publisher_username}`} className="hover:underline">
-                        {app.publisher || app.publisher_username}
+                        @{app.publisher_username}
                       </Link>
                     ) : (
                       app.publisher || "Anonymous"

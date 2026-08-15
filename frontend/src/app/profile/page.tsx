@@ -24,6 +24,54 @@ async function uploadFile(file: File): Promise<string> {
   return data.url as string;
 }
 
+
+function slugifyBase(raw: string): string {
+  return raw
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, "")
+    .replace(/^_+/, "")
+    .slice(0, 30);
+}
+
+/** Prefer GitHub login; otherwise name/email local-part; append 0,1,2… if taken */
+async function suggestAvailableUsername(session: {
+  user?: {
+    name?: string | null;
+    email?: string | null;
+    provider?: string;
+    githubLogin?: string;
+  } | null;
+}): Promise<string> {
+  const u = session?.user;
+  if (!u) return "";
+
+  let base = "";
+  if (u.provider === "github" && u.githubLogin) {
+    base = slugifyBase(u.githubLogin);
+  } else if (u.name) {
+    base = slugifyBase(u.name.split(/\s+/)[0] || u.name);
+  }
+  if (!base || base.length < 3) {
+    const local = (u.email || "").split("@")[0] || "user";
+    base = slugifyBase(local);
+  }
+  if (base.length < 3) base = (base + "user").slice(0, 30);
+
+  for (let i = 0; i < 30; i++) {
+    const candidate = i === 0 ? base : `${base.slice(0, 28)}${i}`;
+    try {
+      const r = await fetch(
+        `${API_URL}/api/username/check?u=${encodeURIComponent(candidate)}`
+      );
+      const data = await r.json();
+      if (data.available) return candidate;
+    } catch {
+      return candidate;
+    }
+  }
+  return `${base}${Date.now().toString().slice(-4)}`;
+}
+
 export default function ProfilePage() {
   const { data: session, status } = useSession();
   const router = useRouter();
@@ -80,12 +128,13 @@ export default function ProfilePage() {
         if (!r.ok) throw new Error("Failed to load profile");
         return r.json();
       })
-      .then((data) => {
+      .then(async (data) => {
         setUserId(data.id || "");
         setEmail(data.email || session.user!.email || "");
-        setUsername(data.username || "");
-        setOriginalUsername(data.username || "");
+        const existing = (data.username || "").toLowerCase();
+        setOriginalUsername(existing);
         setName(data.name || session.user!.name || "");
+        // Prefer OpenApp Hub avatar; OAuth image only as fallback
         setAvatar(data.avatar_url || session.user!.image || "");
         setBio(data.bio || "");
         let lk: AppLink[] = [];
@@ -93,6 +142,35 @@ export default function ProfilePage() {
           if (Array.isArray(data.links)) lk = data.links;
         } catch {}
         setLinks(lk.map((l: any) => ({ label: l.label || "", url: l.url || "", note: l.note || "" })));
+
+        if (existing) {
+          setUsername(existing);
+          setUsernameStatus("ok");
+          setUsernameReason("This is your current username");
+        } else {
+          // Suggest unique username from GitHub login or display name
+          const suggested = await suggestAvailableUsername(session);
+          setUsername(suggested);
+          if (suggested) {
+            // trigger validation UI
+            setUsernameStatus("checking");
+            try {
+              const q = new URLSearchParams({ u: suggested });
+              if (data.id) q.set("except_user_id", data.id);
+              const r = await fetch(`${API_URL}/api/username/check?${q}`);
+              const chk = await r.json();
+              if (chk.available) {
+                setUsernameStatus("ok");
+                setUsernameReason("Suggested — available");
+              } else {
+                setUsernameStatus("bad");
+                setUsernameReason(chk.reason || "Not available");
+              }
+            } catch {
+              setUsernameStatus("idle");
+            }
+          }
+        }
         setLoading(false);
       })
       .catch(() => setLoading(false));
@@ -144,11 +222,26 @@ export default function ProfilePage() {
   const handleAvatar = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (!session?.user?.email) return;
     setUploading(true);
     try {
       const url = await uploadFile(file);
       setAvatar(url);
-      toast("Avatar uploaded", "success");
+      // Persist immediately so it reflects on public profile + apps
+      const res = await fetch(`${API_URL}/api/users`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: session.user.email,
+          avatar_url: url,
+          username: originalUsername || username || undefined,
+          name,
+          bio,
+          links: links.filter((l) => l.url.trim()),
+        }),
+      });
+      if (!res.ok) throw new Error(await res.text() || "Failed to save avatar");
+      toast("Avatar updated", "success");
     } catch (err: any) {
       toast(err.message || "Upload failed", "error");
     } finally {
