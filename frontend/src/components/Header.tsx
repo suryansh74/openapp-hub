@@ -118,7 +118,7 @@ export default function Header({ showPublish = true }: { showPublish?: boolean }
                   <div className="absolute right-0 mt-2 w-56 overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-xl">
                     <div className="border-b border-[var(--border)] px-4 py-3">
                       <p className="truncate text-sm font-medium">
-                        {session.user.name}
+                        {hubUser?.username ? `@${hubUser.username}` : (hubUser?.name || session.user.name)}
                       </p>
                       <p className="truncate text-xs text-[var(--muted)]">
                         {session.user.email}
@@ -126,7 +126,7 @@ export default function Header({ showPublish = true }: { showPublish?: boolean }
                     </div>
                     <div className="p-1.5">
                       <Link
-                        href="/profile"
+                        href={hubUser?.username ? `/u/${hubUser.username}` : "/profile"}
                         onClick={() => setMenuOpen(false)}
                         className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm transition hover:bg-[var(--card-hover)]"
                       >
@@ -135,6 +135,17 @@ export default function Header({ showPublish = true }: { showPublish?: boolean }
                           <circle cx="12" cy="7" r="4" />
                         </svg>
                         Profile
+                      </Link>
+                      <Link
+                        href="/profile"
+                        onClick={() => setMenuOpen(false)}
+                        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm transition hover:bg-[var(--card-hover)]"
+                      >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M12 20h9" />
+                          <path d="M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4L16.5 3.5z" />
+                        </svg>
+                        Edit profile
                       </Link>
                       <button
                         onClick={() => {

@@ -799,18 +799,25 @@ func getPublicUser(w http.ResponseWriter, r *http.Request) {
 	// stats
 	var appCount int64
 	var likesSum int64
+	var commentCount int64
 	db.Model(&App{}).Where("user_id = ?", user.ID).Count(&appCount)
 	db.Model(&App{}).Where("user_id = ?", user.ID).Select("coalesce(sum(likes_count),0)").Scan(&likesSum)
+	// comments on this publisher's apps
+	db.Table("comments").
+		Joins("JOIN apps ON apps.id = comments.app_id").
+		Where("apps.user_id = ?", user.ID).
+		Count(&commentCount)
 
 	var apps []App
 	db.Where("user_id = ?", user.ID).Order("created_at desc").Find(&apps)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"user":       publicUser(user),
-		"app_count":  appCount,
-		"likes_sum":  likesSum,
-		"apps":       apps,
+		"user":          publicUser(user),
+		"app_count":     appCount,
+		"likes_sum":     likesSum,
+		"comment_count": commentCount,
+		"apps":          apps,
 	})
 }
 
