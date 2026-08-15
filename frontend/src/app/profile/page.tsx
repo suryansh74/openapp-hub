@@ -8,6 +8,7 @@ import Image from "next/image";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import { useToast } from "@/components/Toast";
+import { useHubUser } from "@/components/UserProvider";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 const MAX_SIZE = 1 * 1024 * 1024;
@@ -76,6 +77,7 @@ export default function ProfilePage() {
   const { data: session, status } = useSession();
   const router = useRouter();
   const { toast } = useToast();
+  const { refresh: refreshHubUser } = useHubUser();
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -241,6 +243,7 @@ export default function ProfilePage() {
         }),
       });
       if (!res.ok) throw new Error(await res.text() || "Failed to save avatar");
+      await refreshHubUser();
       toast("Avatar updated", "success");
     } catch (err: any) {
       toast(err.message || "Upload failed", "error");
@@ -282,6 +285,7 @@ export default function ProfilePage() {
       const data = await res.json();
       setOriginalUsername(data.username || username);
       setUsernameStatus("ok");
+      await refreshHubUser();
       toast("Profile saved", "success");
     } catch (err: any) {
       toast(err.message || "Save failed", "error");

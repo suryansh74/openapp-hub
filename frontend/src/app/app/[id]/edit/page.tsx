@@ -64,7 +64,6 @@ export default function EditAppPage() {
     download_url: "",
     icon_url: "",
     youtube_url: "",
-    publisher: "",
   });
   const [shots, setShots] = useState<string[]>([]);
   const [links, setLinks] = useState<AppLink[]>([]);
@@ -104,7 +103,6 @@ export default function EditAppPage() {
           download_url: data.download_url || "",
           icon_url: data.icon_url || "",
           youtube_url: data.youtube_url || "",
-          publisher: data.publisher || "",
         });
         setShots(list);
         let linkList: AppLink[] = [];
@@ -188,7 +186,6 @@ export default function EditAppPage() {
         ...form,
         screenshots: shots,
         links: links.filter((l) => l.url.trim()),
-        publisher_avatar: session?.user?.image || "",
       };
 
       const res = await fetch(`${API_URL}/api/apps/${id}`, {
@@ -483,15 +480,6 @@ export default function EditAppPage() {
             </div>
           </div>
 
-          <div>
-            <label className="mb-1.5 block text-sm font-medium">Publisher name</label>
-            <input
-              name="publisher"
-              value={form.publisher}
-              onChange={handleChange}
-              className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm outline-none transition focus:border-[var(--accent)]"
-            />
-          </div>
 
           {error && (
             <p className="rounded-lg bg-red-500/10 px-4 py-3 text-sm text-red-500">{error}</p>

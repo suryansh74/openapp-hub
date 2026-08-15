@@ -7,6 +7,7 @@ import Link from "next/link";
 import Image from "next/image";
 import Header from "@/components/Header";
 import { useToast } from "@/components/Toast";
+import { useHubUser } from "@/components/UserProvider";
 import Footer from "@/components/Footer";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
@@ -37,6 +38,7 @@ export default function PublishPage() {
   }, []);
 
   const { toast } = useToast();
+  const { hubUser, refresh: refreshHubUser, synced } = useHubUser();
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
@@ -49,7 +51,6 @@ export default function PublishPage() {
     download_url: "",
     icon_url: "",
     youtube_url: "",
-    publisher: "",
   });
   const [shots, setShots] = useState<string[]>([]);
   const [links, setLinks] = useState<AppLink[]>([]);
@@ -62,25 +63,15 @@ export default function PublishPage() {
       router.push("/login");
       return;
     }
-    if (session?.user) {
-      setForm((prev) => ({ ...prev, publisher: session.user?.name || prev.publisher }));
-      // Require username before publishing
-      fetch(`${API_URL}/api/user?email=${encodeURIComponent(session.user.email || "")}`)
-        .then(async (r) => {
-          if (r.status === 404) {
-            router.push("/profile");
-            return null;
-          }
-          return r.ok ? r.json() : null;
-        })
-        .then((data) => {
-          if (data && !data.username) {
-            router.push("/profile");
-          }
-        })
-        .catch(() => {});
-    }
   }, [status, session, router]);
+
+  // Require OpenApp Hub username (from DB-synced hub user)
+  useEffect(() => {
+    if (status !== "authenticated" || !synced) return;
+    if (!hubUser?.username) {
+      router.push("/profile");
+    }
+  }, [status, synced, hubUser?.username, router]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     setForm({ ...form, [e.target.name]: e.target.value });
@@ -138,18 +129,8 @@ export default function PublishPage() {
     setError("");
 
     try {
-      if (session?.user?.email) {
-        await fetch(`${API_URL}/api/users`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            email: session.user.email,
-            name: session.user.name || "",
-            avatar_url: session.user.image || "",
-            provider: "oauth",
-          }),
-        });
-      }
+      // Ensure DB user exists (UserProvider also does this; this is a safety net)
+      await refreshHubUser();
 
       const cleanLinks = links.filter((l) => l.url.trim());
 
@@ -161,10 +142,8 @@ export default function PublishPage() {
           screenshots: shots,
           links: cleanLinks,
           user_email: session?.user?.email || "",
-          user_name: session?.user?.name || "",
-          user_avatar: session?.user?.image || "",
-          publisher_avatar: session?.user?.image || "",
-          provider: "oauth",
+          // Do NOT send OAuth avatar/name as publisher — backend reads User table
+          provider: session?.user?.provider || "oauth",
         }),
       });
 
@@ -353,13 +332,6 @@ export default function PublishPage() {
                 <p className="text-xs text-[var(--muted)]">No extra links yet. Click “+ Add link”.</p>
               )}
             </div>
-          </div>
-
-          <div>
-            <label className="mb-1.5 block text-sm font-medium">Your name (Publisher)</label>
-            <input name="publisher" value={form.publisher} onChange={handleChange}
-              className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-sm outline-none transition focus:border-[var(--accent)]"
-              placeholder="Optional" />
           </div>
 
           {error && <p className="rounded-lg bg-red-500/10 px-4 py-3 text-sm text-red-500">{error}</p>}

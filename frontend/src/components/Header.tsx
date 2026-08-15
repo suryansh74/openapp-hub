@@ -7,10 +7,12 @@ import { useSession, signOut } from "next-auth/react";
 import { useTheme } from "./ThemeProvider";
 import ConfirmModal from "./ConfirmModal";
 import { useToast } from "./Toast";
+import { useHubUser } from "./UserProvider";
 
 export default function Header({ showPublish = true }: { showPublish?: boolean }) {
   const { theme, toggleTheme } = useTheme();
   const { data: session, status } = useSession();
+  const { hubUser, loading: hubLoading } = useHubUser();
   const { toast } = useToast();
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -72,7 +74,7 @@ export default function Header({ showPublish = true }: { showPublish?: boolean }
             </button>
 
             {/* Auth area */}
-            {status === "loading" ? (
+            {(status === "loading" || (status === "authenticated" && hubLoading)) ? (
               <div className="h-9 w-9 animate-pulse rounded-full bg-[var(--border)]" />
             ) : session?.user ? (
               <div className="relative" ref={menuRef}>
@@ -81,10 +83,10 @@ export default function Header({ showPublish = true }: { showPublish?: boolean }
                   onClick={() => setMenuOpen((v) => !v)}
                   className="flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--card)] p-0.5 pr-2 transition hover:bg-[var(--card-hover)] sm:pr-2.5"
                 >
-                  {session.user.image ? (
+                  {(hubUser?.avatar_url || session.user.image) ? (
                     <img
-                      src={session.user.image}
-                      alt={session.user.name || "User"}
+                      src={hubUser?.avatar_url || session.user.image || ""}
+                      alt={hubUser?.username || session.user.name || "User"}
                       width={32}
                       height={32}
                       className="h-8 w-8 rounded-full object-cover"
@@ -92,11 +94,11 @@ export default function Header({ showPublish = true }: { showPublish?: boolean }
                     />
                   ) : (
                     <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--accent)] text-sm font-medium text-white">
-                      {(session.user.name || "U")[0].toUpperCase()}
+                      {(hubUser?.username || hubUser?.name || session.user.name || "U")[0].toUpperCase()}
                     </div>
                   )}
                   <span className="hidden max-w-[100px] truncate text-sm sm:inline">
-                    {session.user.name?.split(" ")[0]}
+                    {hubUser?.username ? `@${hubUser.username}` : (hubUser?.name || session.user.name)?.split(" ")[0]}
                   </span>
                   <svg
                     width="14"
