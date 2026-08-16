@@ -72,9 +72,20 @@ export default function Home() {
 
   const [apps, setApps] = useState<App[]>([]);
   const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchInput, setSearchInput] = useState("");
 
   useEffect(() => {
-    fetch(`${API_URL}/api/apps`)
+    const t = setTimeout(() => setSearchQuery(searchInput.trim()), 300);
+    return () => clearTimeout(t);
+  }, [searchInput]);
+
+  useEffect(() => {
+    setLoading(true);
+    const url = searchQuery
+      ? `${API_URL}/api/apps?q=${encodeURIComponent(searchQuery)}`
+      : `${API_URL}/api/apps`;
+    fetch(url)
       .then((res) => res.json())
       .then((data) => {
         setApps(Array.isArray(data) ? data : []);
@@ -84,13 +95,13 @@ export default function Home() {
         setApps([]);
         setLoading(false);
       });
-  }, []);
+  }, [searchQuery]);
 
   return (
     <>
       <Header />
       <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-12 sm:px-6">
-        <section className="mb-12">
+        <section className="mb-10">
           <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
             Discover open-source apps
           </h1>
@@ -98,6 +109,31 @@ export default function Home() {
             Clear explanations of what each app does, why it matters, and how
             to use it — built for humans, not just developers.
           </p>
+          <div className="mt-6 max-w-lg">
+            <label className="sr-only" htmlFor="app-search">
+              Search apps
+            </label>
+            <div className="relative">
+              <svg
+                className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--muted)]"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <circle cx="11" cy="11" r="8" />
+                <path d="M21 21l-4.3-4.3" />
+              </svg>
+              <input
+                id="app-search"
+                type="search"
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                placeholder="Search by name, problem, or publisher…"
+                className="w-full rounded-xl border border-[var(--border)] bg-[var(--card)] py-3 pl-10 pr-4 text-sm outline-none transition focus:border-[var(--accent)]"
+              />
+            </div>
+          </div>
         </section>
 
         {loading ? (
@@ -106,13 +142,26 @@ export default function Home() {
           </div>
         ) : apps.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-[var(--border)] bg-[var(--card)] px-6 py-16 text-center">
-            <p className="text-lg text-[var(--muted)]">No apps published yet.</p>
-            <Link
-              href="/publish"
-              className="mt-4 inline-block text-sm font-medium text-[var(--accent)] hover:underline"
-            >
-              Be the first to publish →
-            </Link>
+            <p className="text-lg text-[var(--muted)]">
+              {searchQuery ? `No apps match “${searchQuery}”.` : "No apps published yet."}
+            </p>
+            {!searchQuery && (
+              <Link
+                href="/publish"
+                className="mt-4 inline-block text-sm font-medium text-[var(--accent)] hover:underline"
+              >
+                Be the first to publish →
+              </Link>
+            )}
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchInput("")}
+                className="mt-4 text-sm font-medium text-[var(--accent)] hover:underline"
+              >
+                Clear search
+              </button>
+            )}
           </div>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2">

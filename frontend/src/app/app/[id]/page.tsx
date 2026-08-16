@@ -8,6 +8,7 @@ import Image from "next/image";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import { useToast } from "@/components/Toast";
+import { useHubUser } from "@/components/UserProvider";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
@@ -25,6 +26,7 @@ type App = {
   publisher: string;
   publisher_avatar: string;
   publisher_username?: string;
+  user_id?: string;
   likes_count: number;
   dislikes_count: number;
   created_at: string;
@@ -427,6 +429,7 @@ export default function AppDetailPage() {
   const params = useParams();
   const id = params.id as string;
   const { data: session } = useSession();
+  const { hubUser } = useHubUser();
   const { toast } = useToast();
 
   const [app, setApp] = useState<App | null>(null);
@@ -705,7 +708,7 @@ export default function AppDetailPage() {
                 {app.dislikes_count || 0}
               </button>
 
-              {session && (
+              {session && hubUser && app.user_id && hubUser.id === app.user_id && (
                 <Link
                   href={`/app/${app.id}/edit`}
                   className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm font-medium transition hover:bg-[var(--card)]"

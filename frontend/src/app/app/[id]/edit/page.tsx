@@ -7,6 +7,8 @@ import Link from "next/link";
 import Image from "next/image";
 import Header from "@/components/Header";
 import { useToast } from "@/components/Toast";
+import { useHubUser } from "@/components/UserProvider";
+import ConfirmModal from "@/components/ConfirmModal";
 import Footer from "@/components/Footer";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
@@ -50,7 +52,11 @@ export default function EditAppPage() {
   const id = params.id as string;
   const router = useRouter();
   const { data: session, status } = useSession();
+  const { hubUser, loading: hubLoading } = useHubUser();
   const { toast } = useToast();
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [appOwnerId, setAppOwnerId] = useState<string>("");
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -116,6 +122,7 @@ export default function EditAppPage() {
           url: l.url || "",
           note: l.note || "",
         })));
+        setAppOwnerId(data.user_id || "");
         setLoading(false);
       })
       .catch((err) => {
@@ -123,6 +130,16 @@ export default function EditAppPage() {
         setLoading(false);
       });
   }, [id, status, router]);
+
+  // Owner-only: redirect if logged-in Hub user is not the publisher
+  useEffect(() => {
+    if (loading || hubLoading || status !== "authenticated") return;
+    if (!appOwnerId) return; // legacy apps without user_id — still block strangers via API
+    if (hubUser && hubUser.id !== appOwnerId) {
+      toast("Only the publisher can edit this app", "error");
+      router.replace(`/app/${id}`);
+    }
+  }, [loading, hubLoading, status, hubUser, appOwnerId, id, router, toast]);
 
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
@@ -176,6 +193,27 @@ export default function EditAppPage() {
     setShots((prev) => prev.filter((_, i) => i !== idx));
   };
 
+  const handleDelete = async () => {
+    if (!session?.user?.email) return;
+    setDeleting(true);
+    try {
+      const res = await fetch(
+        `${API_URL}/api/apps/${id}?user_email=${encodeURIComponent(session.user.email)}`,
+        { method: "DELETE" }
+      );
+      if (!res.ok) {
+        const t = await res.text();
+        throw new Error(t || "Failed to delete");
+      }
+      toast("App deleted", "success");
+      router.push("/");
+    } catch (err: any) {
+      toast(err.message || "Delete failed", "error");
+      setDeleting(false);
+      setConfirmDelete(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
@@ -186,6 +224,7 @@ export default function EditAppPage() {
         ...form,
         screenshots: shots,
         links: links.filter((l) => l.url.trim()),
+        user_email: session?.user?.email || "",
       };
 
       const res = await fetch(`${API_URL}/api/apps/${id}`, {
@@ -501,8 +540,29 @@ export default function EditAppPage() {
             </Link>
           </div>
         </form>
+
+        <div className="mt-12 border-t border-[var(--border)] pt-8">
+          <p className="mb-3 text-sm text-[var(--muted)]">Danger zone</p>
+          <button
+            type="button"
+            onClick={() => setConfirmDelete(true)}
+            className="rounded-xl border border-red-500/40 px-4 py-2.5 text-sm font-medium text-red-500 transition hover:bg-red-500/10"
+          >
+            Delete this app
+          </button>
+        </div>
       </main>
       <Footer />
+      <ConfirmModal
+        open={confirmDelete}
+        title="Delete this app?"
+        message="This will permanently remove the app, its comments, and votes. This cannot be undone."
+        confirmLabel={deleting ? "Deleting..." : "Delete app"}
+        cancelLabel="Cancel"
+        danger
+        onConfirm={handleDelete}
+        onCancel={() => !deleting && setConfirmDelete(false)}
+      />
     </>
   );
 }

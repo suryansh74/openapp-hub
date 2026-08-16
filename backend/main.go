@@ -122,8 +122,17 @@ func listApps(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	query := db.Order("created_at desc")
+	if q != "" {
+		like := "%" + strings.ToLower(q) + "%"
+		query = query.Where(
+			"LOWER(name) LIKE ? OR LOWER(problem) LIKE ? OR LOWER(COALESCE(significance,'')) LIKE ? OR LOWER(COALESCE(publisher,'')) LIKE ?",
+			like, like, like, like,
+		)
+	}
 	var apps []App
-	if err := db.Order("created_at desc").Find(&apps).Error; err != nil {
+	if err := query.Find(&apps).Error; err != nil {
 		http.Error(w, "failed to fetch apps", http.StatusInternalServerError)
 		return
 	}
@@ -286,11 +295,38 @@ func updateApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Owner-only: require user_email and match app.UserID
+	email, _ := input["user_email"].(string)
+	email = strings.TrimSpace(email)
+	if email == "" {
+		http.Error(w, "user_email required", http.StatusUnauthorized)
+		return
+	}
+	var user User
+	if err := db.Where("email = ?", email).First(&user).Error; err != nil {
+		http.Error(w, "user not found", http.StatusUnauthorized)
+		return
+	}
+	if app.UserID == "" || app.UserID != user.ID {
+		http.Error(w, "only the publisher can edit this app", http.StatusForbidden)
+		return
+	}
+
 	updates := map[string]interface{}{"updated_at": time.Now().UTC()}
-	for _, key := range []string{"name", "problem", "significance", "how_to_use", "download_url", "icon_url", "youtube_url", "publisher", "publisher_avatar"} {
+	for _, key := range []string{"name", "problem", "significance", "how_to_use", "download_url", "icon_url", "youtube_url"} {
 		if v, ok := input[key]; ok {
 			updates[key] = v
 		}
+	}
+	// Keep publisher label in sync with Hub profile (do not accept arbitrary publisher takeover)
+	if user.Username != "" {
+		updates["publisher"] = "@" + user.Username
+		updates["publisher_username"] = user.Username
+	} else if user.Name != "" {
+		updates["publisher"] = user.Name
+	}
+	if user.AvatarURL != "" {
+		updates["publisher_avatar"] = user.AvatarURL
 	}
 	if v, ok := input["screenshots"]; ok {
 		b, _ := json.Marshal(v)
@@ -308,6 +344,66 @@ func updateApp(w http.ResponseWriter, r *http.Request) {
 	db.First(&app, "id = ?", id)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(app)
+}
+
+func deleteApp(w http.ResponseWriter, r *http.Request) {
+	enableCORS(w)
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if r.Method != http.MethodDelete {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	id := strings.TrimPrefix(r.URL.Path, "/api/apps/")
+	id = strings.Split(id, "/")[0]
+	if id == "" {
+		http.Error(w, "missing id", http.StatusBadRequest)
+		return
+	}
+	email := strings.TrimSpace(r.URL.Query().Get("user_email"))
+	if email == "" {
+		// also accept JSON body
+		var body struct {
+			UserEmail string `json:"user_email"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		email = strings.TrimSpace(body.UserEmail)
+	}
+	if email == "" {
+		http.Error(w, "user_email required", http.StatusUnauthorized)
+		return
+	}
+	var app App
+	if err := db.First(&app, "id = ?", id).Error; err != nil {
+		http.Error(w, "app not found", http.StatusNotFound)
+		return
+	}
+	var user User
+	if err := db.Where("email = ?", email).First(&user).Error; err != nil {
+		http.Error(w, "user not found", http.StatusUnauthorized)
+		return
+	}
+	if app.UserID == "" || app.UserID != user.ID {
+		http.Error(w, "only the publisher can delete this app", http.StatusForbidden)
+		return
+	}
+
+	// Collect comments for this app, delete votes, comments, then app
+	var commentIDs []string
+	db.Model(&Comment{}).Where("app_id = ?", id).Pluck("id", &commentIDs)
+	if len(commentIDs) > 0 {
+		db.Where("target_type = ? AND target_id IN ?", "comment", commentIDs).Delete(&Vote{})
+		db.Where("app_id = ?", id).Delete(&Comment{})
+	}
+	db.Where("target_type = ? AND target_id = ?", "app", id).Delete(&Vote{})
+	if err := db.Delete(&app).Error; err != nil {
+		http.Error(w, "failed to delete app", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "deleted", "id": id})
 }
 
 // --- Votes (like / dislike) ---
@@ -1006,18 +1102,14 @@ func main() {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
 	})
-	http.HandleFunc("/api/apps/", func(w http.ResponseWriter, r *http.Request) {
-		path := r.URL.Path
-		if strings.Contains(path, "/vote") {
-			// reserved
-			http.Error(w, "use /api/vote", http.StatusBadRequest)
-			return
-		}
+		http.HandleFunc("/api/apps/", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet, http.MethodOptions:
 			getApp(w, r)
 		case http.MethodPatch, http.MethodPut:
 			updateApp(w, r)
+		case http.MethodDelete:
+			deleteApp(w, r)
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
