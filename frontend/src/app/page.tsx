@@ -74,28 +74,52 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchInput, setSearchInput] = useState("");
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [total, setTotal] = useState(0);
+  const limit = 12;
 
   useEffect(() => {
-    const t = setTimeout(() => setSearchQuery(searchInput.trim()), 300);
+    const t = setTimeout(() => {
+      setSearchQuery(searchInput.trim());
+      setPage(1);
+    }, 300);
     return () => clearTimeout(t);
   }, [searchInput]);
 
   useEffect(() => {
     setLoading(true);
-    const url = searchQuery
-      ? `${API_URL}/api/apps?q=${encodeURIComponent(searchQuery)}`
-      : `${API_URL}/api/apps`;
-    fetch(url)
-      .then((res) => res.json())
+    const params = new URLSearchParams();
+    params.set("page", String(page));
+    params.set("limit", String(limit));
+    if (searchQuery) params.set("q", searchQuery);
+    fetch(`${API_URL}/api/apps?${params}`)
+      .then(async (res) => {
+        if (res.status === 429) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.error || "Too many requests — please wait a moment");
+        }
+        return res.json();
+      })
       .then((data) => {
-        setApps(Array.isArray(data) ? data : []);
+        // Support both new paginated shape and legacy array
+        if (Array.isArray(data)) {
+          setApps(data);
+          setTotalPages(1);
+          setTotal(data.length);
+        } else {
+          setApps(Array.isArray(data.items) ? data.items : []);
+          setTotalPages(data.total_pages || 1);
+          setTotal(data.total || 0);
+        }
         setLoading(false);
       })
-      .catch(() => {
+      .catch((err) => {
         setApps([]);
         setLoading(false);
+        console.error(err);
       });
-  }, [searchQuery]);
+  }, [searchQuery, page]);
 
   return (
     <>
@@ -201,6 +225,36 @@ export default function Home() {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {!loading && totalPages > 1 && (
+          <div className="mt-10 flex flex-col items-center gap-3 sm:flex-row sm:justify-between">
+            <p className="text-sm text-[var(--muted)]">
+              {total} app{total === 1 ? "" : "s"}
+              {searchQuery ? ` matching “${searchQuery}”` : ""}
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={page <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm transition hover:bg-[var(--card)] disabled:opacity-40"
+              >
+                Previous
+              </button>
+              <span className="text-sm text-[var(--muted)]">
+                Page {page} of {totalPages}
+              </span>
+              <button
+                type="button"
+                disabled={page >= totalPages}
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-sm transition hover:bg-[var(--card)] disabled:opacity-40"
+              >
+                Next
+              </button>
+            </div>
           </div>
         )}
       </main>

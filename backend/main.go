@@ -7,7 +7,9 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cloudinary/cloudinary-go/v2"
@@ -99,6 +101,100 @@ type BacklogItem struct {
 var db *gorm.DB
 var cld *cloudinary.Cloudinary
 
+// --- Simple in-memory rate limiter (per IP, fixed window) ---
+// Why: free-tier API is easy to abuse (spam votes, flood search, burn Cloudinary/DB).
+// Limits are intentionally modest for Stage 1; can move to Redis later.
+
+type rateBucket struct {
+	count   int
+	resetAt time.Time
+}
+
+type rateLimiter struct {
+	mu       sync.Mutex
+	visitors map[string]*rateBucket
+	limit    int
+	window   time.Duration
+}
+
+func newRateLimiter(limit int, window time.Duration) *rateLimiter {
+	rl := &rateLimiter{
+		visitors: make(map[string]*rateBucket),
+		limit:    limit,
+		window:   window,
+	}
+	go func() {
+		for {
+			time.Sleep(time.Minute)
+			rl.mu.Lock()
+			now := time.Now()
+			for k, b := range rl.visitors {
+				if now.After(b.resetAt) {
+					delete(rl.visitors, k)
+				}
+			}
+			rl.mu.Unlock()
+		}
+	}()
+	return rl
+}
+
+func (rl *rateLimiter) allow(key string) (ok bool, remaining int, retryAfter time.Duration) {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	now := time.Now()
+	b, exists := rl.visitors[key]
+	if !exists || now.After(b.resetAt) {
+		rl.visitors[key] = &rateBucket{count: 1, resetAt: now.Add(rl.window)}
+		return true, rl.limit - 1, 0
+	}
+	if b.count >= rl.limit {
+		return false, 0, b.resetAt.Sub(now)
+	}
+	b.count++
+	return true, rl.limit - b.count, 0
+}
+
+func clientIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		parts := strings.Split(xff, ",")
+		return strings.TrimSpace(parts[0])
+	}
+	if xri := r.Header.Get("X-Real-IP"); xri != "" {
+		return strings.TrimSpace(xri)
+	}
+	host := r.RemoteAddr
+	if i := strings.LastIndex(host, ":"); i != -1 {
+		return host[:i]
+	}
+	return host
+}
+
+// General API: 120 requests / minute / IP
+var limitGeneral = newRateLimiter(120, time.Minute)
+
+// Write-heavy: votes, comments, publish, upload — 30 / minute / IP
+var limitWrite = newRateLimiter(30, time.Minute)
+
+// Search: slightly tighter — 60 / minute / IP (pagination multiplies calls)
+var limitSearch = newRateLimiter(60, time.Minute)
+
+func applyRateLimit(w http.ResponseWriter, r *http.Request, lim *rateLimiter) bool {
+	ok, remaining, retry := lim.allow(clientIP(r))
+	w.Header().Set("X-RateLimit-Remaining", strconv.Itoa(remaining))
+	if !ok {
+		w.Header().Set("Retry-After", strconv.Itoa(int(retry.Seconds())+1))
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"error":       "rate limit exceeded",
+			"retry_after": int(retry.Seconds()) + 1,
+		})
+		return false
+	}
+	return true
+}
+
 func enableCORS(w http.ResponseWriter) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
@@ -122,8 +218,26 @@ func listApps(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		return
 	}
+	// Search/list is public and easy to hammer — use search limiter
+	if !applyRateLimit(w, r, limitSearch) {
+		return
+	}
+
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
-	query := db.Order("created_at desc")
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	if page < 1 {
+		page = 1
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit < 1 {
+		limit = 12
+	}
+	if limit > 50 {
+		limit = 50
+	}
+	offset := (page - 1) * limit
+
+	query := db.Model(&App{})
 	if q != "" {
 		like := "%" + strings.ToLower(q) + "%"
 		query = query.Where(
@@ -131,13 +245,36 @@ func listApps(w http.ResponseWriter, r *http.Request) {
 			like, like, like, like,
 		)
 	}
+
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		http.Error(w, "failed to count apps", http.StatusInternalServerError)
+		return
+	}
+
 	var apps []App
-	if err := query.Find(&apps).Error; err != nil {
+	if err := query.Order("created_at desc").Offset(offset).Limit(limit).Find(&apps).Error; err != nil {
 		http.Error(w, "failed to fetch apps", http.StatusInternalServerError)
 		return
 	}
+	if apps == nil {
+		apps = []App{}
+	}
+
+	totalPages := int(total) / limit
+	if int(total)%limit != 0 {
+		totalPages++
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(apps)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"items":       apps,
+		"page":        page,
+		"limit":       limit,
+		"total":       total,
+		"total_pages": totalPages,
+		"q":           q,
+	})
 }
 
 func getApp(w http.ResponseWriter, r *http.Request) {
@@ -169,6 +306,9 @@ func createApp(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if !applyRateLimit(w, r, limitWrite) {
 		return
 	}
 
@@ -277,6 +417,9 @@ func updateApp(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !applyRateLimit(w, r, limitWrite) {
+		return
+	}
 	id := strings.TrimPrefix(r.URL.Path, "/api/apps/")
 	id = strings.Split(id, "/")[0]
 	if id == "" {
@@ -356,6 +499,9 @@ func deleteApp(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !applyRateLimit(w, r, limitWrite) {
+		return
+	}
 	id := strings.TrimPrefix(r.URL.Path, "/api/apps/")
 	id = strings.Split(id, "/")[0]
 	if id == "" {
@@ -412,6 +558,12 @@ func voteHandler(w http.ResponseWriter, r *http.Request) {
 	enableCORS(w)
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if r.Method != http.MethodGet && !applyRateLimit(w, r, limitWrite) {
+		return
+	}
+	if r.Method == http.MethodGet && !applyRateLimit(w, r, limitGeneral) {
 		return
 	}
 
@@ -564,6 +716,9 @@ func createComment(w http.ResponseWriter, r *http.Request) {
 	enableCORS(w)
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if !applyRateLimit(w, r, limitWrite) {
 		return
 	}
 	if r.Method != http.MethodPost {
@@ -720,6 +875,9 @@ func uploadImage(w http.ResponseWriter, r *http.Request) {
 	enableCORS(w)
 	if r.Method == http.MethodOptions {
 		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if !applyRateLimit(w, r, limitWrite) {
 		return
 	}
 	if r.Method != http.MethodPost {
