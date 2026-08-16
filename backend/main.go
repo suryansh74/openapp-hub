@@ -510,30 +510,32 @@ func deleteApp(w http.ResponseWriter, r *http.Request) {
 	}
 	email := strings.TrimSpace(r.URL.Query().Get("user_email"))
 	if email == "" {
-		// also accept JSON body
 		var body struct {
 			UserEmail string `json:"user_email"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		email = strings.TrimSpace(body.UserEmail)
 	}
-	if email == "" {
-		http.Error(w, "user_email required", http.StatusUnauthorized)
-		return
-	}
 	var app App
 	if err := db.First(&app, "id = ?", id).Error; err != nil {
 		http.Error(w, "app not found", http.StatusNotFound)
 		return
 	}
-	var user User
-	if err := db.Where("email = ?", email).First(&user).Error; err != nil {
-		http.Error(w, "user not found", http.StatusUnauthorized)
-		return
-	}
-	if app.UserID == "" || app.UserID != user.ID {
-		http.Error(w, "only the publisher can delete this app", http.StatusForbidden)
-		return
+	// Owned apps: require matching publisher. Orphans (empty user_id): allow delete for catalog cleanup.
+	if app.UserID != "" {
+		if email == "" {
+			http.Error(w, "user_email required", http.StatusUnauthorized)
+			return
+		}
+		var user User
+		if err := db.Where("email = ?", email).First(&user).Error; err != nil {
+			http.Error(w, "user not found", http.StatusUnauthorized)
+			return
+		}
+		if app.UserID != user.ID {
+			http.Error(w, "only the publisher can delete this app", http.StatusForbidden)
+			return
+		}
 	}
 
 	// Collect comments for this app, delete votes, comments, then app
